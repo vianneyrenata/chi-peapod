@@ -1,0 +1,2234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CHI Peapod - Prototype</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🫛</text></svg>">
+<link rel="apple-touch-icon" href="img-asset/peapod-icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:ital,wght@0,400..900;1,400..900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* Academic (default) = GREEN, Student = purple, Hobby = orange — swapped 2026-08-25 (was purple/green).
+       --purple is the historical name for "the accent colour"; it is NOT purple in the default theme. */
+    --purple:#1a9d6c;
+    --purple-dark:#137a54;
+    --accent-light:#7fd9b3;  /* light end of the avatar/logo gradients */
+    --ink:#1c1c28;
+    --gray:#6b6b7e;        /* 5.2:1 on white (was #8a8a99 at 3.4:1 — below WCAG AA 4.5) */
+    --accent-text:#137a54; /* accent used as TEXT and as the filled-button background (white on it passes AA) */
+    --tint:#eaf7f0;        /* pressed/hover tint for rows and icon buttons */
+    --line:#e4e4ec;
+    --bg:#eef0f6;
+    --card:#ffffff;
+    --on-accent:#fff;      /* label on a filled accent button */
+    --field-line:#8e8ea3;  /* text-field border: 3.1:1 on the field (WCAG 1.4.11); --line stays for dividers */
+    --bio:#444;
+  }
+  /* Student View: swap the accent to purple as a mode indicator; reverts when toggled off. */
+  body.student-view{
+    --purple:#7B61FF;
+    --purple-dark:#5c3fe0;
+    --accent-light:#a78bfa;
+    --accent-text:#5c3fe0;
+    --tint:#f4f1ff;
+  }
+  /* Side Interest View: swap the accent to orange — same mode-indicator trick, mutually
+     exclusive with Student View (see setViewMode()). Orange rather than blue/magenta: maximally
+     distinct from both green (main) and purple (student) on the wheel. */
+  body.side-view{
+    --purple:#e8792e;
+    --purple-dark:#c2601c;
+    --accent-light:#f5b27a;
+    --accent-text:#b5560f;
+    --tint:#fef7f0;  /* was #fdf1e6: accent text on it 4.39:1, now 4.60 */
+  }
+  *{box-sizing:border-box;}
+  /* Browsers give <button>/<input>/<select> their own UA font (Arial here) instead of the page's —
+     every button without an explicit font:inherit was rendering in Arial next to Nunito text
+     (close ✕, "Show more matches", the view picker, ? help, avatar pill, map controls). */
+  button, input, textarea, select{ font-family:inherit; }
+  body{
+    margin:0;
+    font-family:"Nunito",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:
+      radial-gradient(circle, #d6d9e6 1px, transparent 1px) 0 0/22px 22px,
+      var(--bg);
+    color:var(--ink);
+    min-height:100vh;
+    padding:48px 16px;
+  }
+  .board{ text-align:center; max-width:520px; margin:0 auto; }
+  .feedback-link{
+    margin-top:12px; border:0; background:transparent; color:var(--gray); /* #756f93 was 4.14:1 on the page */
+    font:600 12px inherit; cursor:pointer; text-decoration:underline;
+    text-underline-offset:3px;
+  }
+  .feedback-link:hover{ color:var(--purple); }
+  .app{
+    background:var(--card);
+    border-radius:20px;
+    box-shadow:0 20px 50px -20px rgba(30,30,60,.25);
+    overflow:hidden;
+    position:relative;
+  }
+  .screen{
+    position:relative;
+    display:none;
+    flex-direction:column;
+    padding:32px 28px 28px;
+    min-height:560px;
+    animation:in .28s ease;
+  }
+  .screen.active{ display:flex; }
+  @media (prefers-reduced-motion: reduce){
+    *, *::before, *::after{ animation:none !important; transition:none !important; }
+  }
+  @keyframes in{ from{opacity:0; transform:translateY(10px);} to{opacity:1; transform:translateY(0);} }
+
+  .backbtn{
+    position:absolute; top:20px; left:20px;
+    -webkit-tap-highlight-color:transparent;
+    width:32px;height:32px;border-radius:50%;
+    background:#f4f4fa; border:none; color:var(--ink);
+    font-size:16px; cursor:pointer; z-index:5;
+  }
+  .backbtn:active{ background:#e6e6f0; }
+
+  h1{ font-size:26px; margin:0 0 4px; }
+  .backbtn + h1{ margin-top:28px; }
+  h2{ font-size:20px; margin:0 0 4px; }
+  p.sub{ color:var(--gray); font-size:14px; margin:0 0 24px; }
+
+  .spacer{ flex:1; }
+
+  .btn{
+    background:var(--accent-text); color:var(--on-accent); border:none; /* darker accent: white text >= 4.9:1 in all themes */
+    padding:14px; border-radius:999px; font-size:15px; font-weight:600;
+    cursor:pointer; width:100%;
+  }
+  .btn:active{ filter:brightness(.85); }
+  .btn.secondary{ background:#f4f4fa; color:var(--ink); }
+  .btn.danger{ background:#fde8e8; color:#c53030; }
+  .btn.success{ background:#137a54; color:#fff; }
+  .btn.ghost{ background:transparent; color:var(--accent-text); font-weight:600; }
+  .btn.ghost:active{ background:var(--tint); }
+  .btn.small{ padding:10px; font-size:13px; }
+
+  label{ font-size:12px; font-weight:600; color:var(--gray); display:block; margin:16px 0 6px; }
+  input[type=text], textarea{
+    width:100%; border:1.5px solid var(--field-line); border-radius:10px;
+    padding:12px; font-size:15px; font-family:inherit; color:var(--ink);
+    background:#fbfbfe;
+  }
+  textarea{ resize:none; height:80px; }
+  input:focus, textarea:focus{ outline:none; border-color:var(--purple); box-shadow:0 0 0 1.5px var(--purple); }
+  /* keyboard focus ring for everything else (touch/mouse don't trigger :focus-visible on buttons) */
+  :focus-visible{ outline:2px solid var(--accent-text); outline-offset:2px; }
+  input:focus-visible, textarea:focus-visible{ outline:none; }
+  .aff-suggestions{
+    display:none; width:100%; max-height:180px; overflow-y:auto; margin-top:4px;
+    border:1px solid var(--line); border-radius:10px; background:#fff;
+    box-shadow:0 8px 18px rgba(30,30,60,.10); text-align:left;
+  }
+  .aff-suggestions.active{ display:block; }
+  .aff-option{
+    display:block; width:100%; padding:9px 12px; border:0; border-bottom:1px solid #f0f0f5;
+    background:#fff; color:var(--ink); font:inherit; font-size:13px; text-align:left; cursor:pointer;
+  }
+  .aff-option:last-child{ border-bottom:0; }
+  .aff-option:hover, .aff-option:active{ background:var(--tint); }
+
+  .logo-mark{
+    width:180px;height:auto;display:block;margin:0 auto 16px;
+  }
+  .center{ text-align:center; margin:auto 0; }
+  @keyframes dreamyFloat{ 0%,100%{transform:translateY(0) rotate(-4deg);} 50%{transform:translateY(-10px) rotate(4deg);} }
+  #draftingEmoji{ display:inline-block; animation:dreamyFloat 1.8s ease-in-out infinite; }
+
+  .banner{
+    font-size:12px; padding:10px 12px; border-radius:10px; margin-bottom:14px;
+    text-align:left;
+  }
+  .banner.found{ background:#e9fbf1; color:#16794a; }
+  .banner.warn{ background:#fff6e5; color:#8a5f00; } /* #9a6a00 was 4.41:1 */
+
+  .avatar{
+    width:72px;height:72px;border-radius:50%; flex-shrink:0; /* flex item next to long text — never let it squash into an oval */
+    background:linear-gradient(135deg,var(--accent-light),var(--purple));
+    display:flex;align-items:center;justify-content:center;
+    color:#fff;font-weight:700;font-size:24px;margin:0 auto 12px;
+  }
+
+  .profile-field{ text-align:left; }
+
+  /* home screen */
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:14px;
+  }
+  .topbar h1{ font-size:20px; white-space:nowrap; }
+  /* iPhone SE / 320px-wide phones: title + view pill + help + avatar don't fit on one line — the
+     avatar was pushed off the card's right edge. Let the controls wrap under the title instead. */
+  .topbar{ flex-wrap:wrap; row-gap:8px; }
+  .topbar > div{ flex-shrink:0; margin-left:auto; }
+  .profile-pill{
+    width:36px;height:36px;border-radius:50%; flex-shrink:0;
+    background:linear-gradient(135deg,var(--accent-light),var(--purple));
+    color:#fff; font-weight:700; font-size:13px;
+    display:flex;align-items:center;justify-content:center;
+    cursor:pointer; border:none;
+  }
+  .profile-pill:active{ opacity:.75; }
+  .faq-btn{
+    width:28px;height:28px;border-radius:50%;
+    border:1.5px solid var(--line); background:#fff; color:var(--gray);
+    font-size:13px; font-weight:700; cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .faq-btn:hover, .faq-btn:active{ border-color:var(--purple); color:var(--purple); background:var(--tint); }
+  /* HIG: hit region >= 44x44pt. These stay visually small (28-32px circles) but get an invisible
+     tap pad around them via ::before, so the layout doesn't change. */
+  .backbtn, .faq-btn, .map-control{ position:relative; }
+  .backbtn::before, .faq-btn::before, .map-control::before{ content:''; position:absolute; inset:-7px; }
+  .faq-btn::before{ inset:-8px; }
+  .faq-item{ margin-bottom:18px; }
+  .faq-item:last-child{ margin-bottom:0; }
+  .faq-q{ font-weight:700; color:var(--ink); margin-bottom:4px; }
+  .faq-a a{ color:var(--accent-text); }
+  .section-divider{ border-top:1px solid var(--purple); margin:4px 0 16px; }
+  .umap-card{
+    background:#fbfbfe; border:1px solid var(--line); border-radius:16px;
+    padding:10px; margin-bottom:16px;
+  }
+  .map-header{ display:flex; align-items:center; justify-content:space-between; gap:8px; margin:2px 4px 6px; }
+  .umap-card .cap{ font-size:11px; color:var(--gray); text-align:left; margin:0; font-weight:600; min-width:0; }
+  .map-explainer{ font-size:11px; color:var(--gray); text-align:left; line-height:1.4; margin:0 4px 8px; }
+  .map-controls{ display:flex; align-items:center; justify-content:flex-end; gap:12px; flex-shrink:0; }
+  .map-control{ width:30px; height:30px; border:1px solid var(--line); border-radius:7px; background:#fff; color:var(--ink); font-size:17px; font-weight:700; cursor:pointer; line-height:1; }
+  .map-control:hover, .map-control:active{ border-color:var(--purple); color:var(--purple); background:var(--tint); }
+  .zoom-label{ min-width:34px; color:var(--gray); font-size:11px; text-align:center; }
+  @media (max-width:460px){
+    .map-header{ align-items:center; }
+    .umap-card .cap{ font-size:12px; }
+    .map-detail{ display:none; }
+    .map-controls{ gap:4px; }
+    .map-control{ width:32px; height:32px; }
+  }
+  svg{ touch-action:none; cursor:grab; }
+  svg:active{ cursor:grabbing; }
+  svg circle{ cursor:pointer; transition:r .12s ease; }
+  svg circle:hover{ stroke:#1c1c28; stroke-width:1.5; }
+  svg circle.me{ cursor:default; }
+
+  /* three-dot loader over the map while the CSV/embeddings are still on their way */
+  .map-stage{ position:relative; }
+  .map-loading{ display:none; position:absolute; inset:0; align-items:center; justify-content:center; gap:7px; }
+  .map-loading.active{ display:flex; }
+  .map-loading span{ width:9px; height:9px; border-radius:50%; background:var(--purple); opacity:.35; animation:dotPulse 1.1s ease-in-out infinite; }
+  .map-loading span:nth-child(2){ animation-delay:.18s; } .map-loading span:nth-child(3){ animation-delay:.36s; }
+  @keyframes dotPulse{ 0%,80%,100%{ transform:translateY(0); opacity:.35; } 40%{ transform:translateY(-6px); opacity:1; } }
+  .empty-note{ font-size:12px; color:var(--gray); text-align:left; padding:8px 4px 10px; line-height:1.45; }
+  .list-title{ font-size:13px; font-weight:700; text-align:left; margin:6px 0 8px; display:flex; align-items:center; gap:6px;}
+  .row{
+    display:flex; align-items:center; gap:10px;
+    background:#fbfbfe; border:1px solid var(--line); border-radius:12px;
+    padding:10px 12px; margin-bottom:8px; cursor:pointer; text-align:left;
+    width:100%; font:inherit; color:var(--ink); /* rows are <button>s */
+  }
+  .row .dot{ width:8px;height:8px;border-radius:50%; flex-shrink:0; }
+  .row .rowname{ font-size:13px; font-weight:600; }
+  .row .rowsub{ font-size:11px; color:var(--gray); }
+  .row .score{ margin-left:auto; font-size:11px; font-weight:700; color:var(--accent-text); }
+  .row:active{ background:var(--tint); }
+
+  /* bubble popup */
+  .overlay{
+    position:fixed; inset:0; background:rgba(20,20,35,.45);
+    display:none; align-items:center; justify-content:center; z-index:30;
+    padding:24px;
+  }
+  .overlay.active{ display:flex; }
+  .bubble{
+    background:#fff; width:100%; max-width:420px; border-radius:20px;
+    padding:22px 24px 28px; animation:pop .18s ease; position:relative;
+    max-height:80vh; overflow-y:auto; scrollbar-width:none; -ms-overflow-style:none;
+  }
+  .bubble::-webkit-scrollbar{ width:0; height:0; }
+  @keyframes pop{ from{transform:scale(.96); opacity:0;} to{transform:scale(1); opacity:1;} }
+  .sticky-header{
+    position:sticky; top:-22px; z-index:2; background:#fff;
+    margin:-22px -24px 12px; padding:22px 24px 14px; border-radius:20px 20px 0 0;
+  }
+  .bubble-top{ display:flex; gap:12px; align-items:center; }
+  .bubble-actions{ display:flex; gap:10px; margin-top:16px; }
+  .bubble-actions .btn{ flex:1; }
+  .closebubble{
+    position:absolute; top:2px; right:8px; width:44px; height:44px; background:none; border:none;
+    color:var(--gray); font-size:20px; cursor:pointer; z-index:1; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .closebubble:active{ background:#f4f4fa; color:var(--ink); }
+  /* every bubble title sits next to the absolutely-positioned close button — reserve
+     space so long/wrapping text never runs under it */
+  .bubble h2{ padding:0 28px; }
+  .presenting{
+    font-size:12px; color:#16794a; background:#e9fbf1; border-radius:10px;
+    padding:8px 10px; text-align:left; margin:10px 0 0; font-weight:600;
+  }
+
+  /* view/edit toggle for profile fields */
+  .profile-field input[readonly], .profile-field textarea[readonly]{
+    border-color:transparent; background:transparent; padding:2px 0;
+    color:var(--ink); font-size:15px;
+  }
+  .profile-field input:not([readonly]), .profile-field textarea:not([readonly]){
+    border-color:var(--purple); background:#fbfbfe;
+  }
+  /* Dark Mode (HIG dark-mode.md): follows the system setting, no in-app toggle. Green-tinted charcoal,
+     popups one step lighter than the page (base/elevated); accents LIGHTENED so accent text is 6-9:1,
+     which means filled buttons take a dark label (--on-accent) instead of white.
+     Light mode still uses a few literal colours (#fff, #fbfbfe, #f4f4fa) — each one is overridden below;
+     a new literal light colour needs a line here too. */
+  @media (prefers-color-scheme: dark){
+  :root{
+    --purple:#34b27f; --purple-dark:#2a9168; --accent-light:#7fd9b3;
+    --ink:#e7ece8; --gray:#9ba79f; --accent-text:#4fd19b; --on-accent:#101512;
+    --tint:#1a2e23; --line:#2e3832; --field-line:#6b7a70; --bio:#c9d1cb; --bg:#101512; --card:#181e1a; --surface:#1f2621; --raised:#232b26;
+    color-scheme:dark;
+  }
+  body.student-view{ --purple:#8f7bff; --purple-dark:#7560f0; --accent-light:#b9abff; --accent-text:#a996ff; --tint:#241f3a; }
+  body.side-view{ --purple:#ee8a45; --purple-dark:#d4712d; --accent-light:#f5b27a; --accent-text:#f2a15f; --tint:#35251a; }
+  body{ background: radial-gradient(circle, #1f2722 1px, transparent 1px) 0 0/22px 22px, var(--bg); }
+  .app{ box-shadow:0 20px 50px -20px rgba(0,0,0,.6); }
+  .btn{ color:var(--on-accent); }
+  .btn.secondary, .backbtn{ background:var(--raised); color:var(--ink); }
+  .btn.danger{ background:#3a1d1d; color:#ff9b9b; }
+  .btn.success{ background:var(--accent-text); color:var(--on-accent); }
+  input[type=text], textarea, .umap-card, .row, .profile-field input:not([readonly]), .profile-field textarea:not([readonly]){ background:var(--surface); }
+  .aff-suggestions, .aff-option, .faq-btn, .map-control{ background:var(--raised); }
+  .aff-option{ border-bottom-color:var(--line); }
+  .bubble, .sticky-header{ background:var(--raised); }   /* elevated, per HIG base/elevated */
+  .bubble .row{ background:#29322c; }
+  .closebubble:active, .backbtn:active{ background:#2e3832; }
+  .banner.found, .presenting{ background:#15301f; color:#7ee2b0; }
+  .banner.warn{ background:#332812; color:#f0c25a; }
+  .feedback-link{ color:var(--gray); }
+  svg circle:hover{ stroke:#e7ece8; }
+  .overlay{ background:rgba(0,0,0,.6); }
+}
+</style>
+</head>
+<body>
+<div class="board">
+  <div class="app">
+    <!-- 1. Splash -->
+    <div class="screen active" data-screen="splash">
+      <div class="center">
+        <img class="logo-mark" src="img-asset/peapod-mascot-v2.png" alt="CHI Peapod">
+        <h1>CHI Peapod - Prototype</h1>
+        <p class="sub">Find your people at the conference.</p>
+        <button class="btn" onclick="goSplashContinue()">Continue</button>
+        <p style="font-size:11px; color:var(--gray); margin-top:16px;">Your profile is remembered on this device only (local browser storage) - clearing your browser data or history means keying in again.</p>
+      </div>
+    </div>
+
+    <!-- 2. Key in personal info -->
+    <div class="screen" data-screen="keyin">
+      <button class="backbtn" onclick="show('splash')">←</button>
+      <h1>You!</h1>
+      <p class="sub">Let's find your profile.</p>
+      <label>Name</label>
+      <input type="text" id="inName" placeholder="e.g. Vianney Renata">
+      <label>Affiliation</label>
+      <input type="text" id="inAff" placeholder="e.g. University / Company" onfocus="renderAffOptions()" oninput="renderAffOptions(); document.getElementById('keyinNote').style.display='none'" onblur="hideAffOptions()">
+      <div class="aff-suggestions" id="affOptions" aria-label="Affiliation suggestions"></div>
+      <div class="banner warn" id="keyinNote" style="display:none; margin-top:10px;">Please add your affiliation.</div>
+      <div class="spacer"></div>
+      <button class="btn" onclick="lookup()">Find me</button>
+    </div>
+
+    <!-- 3a. Not found: typo -->
+    <div class="screen" data-screen="typo">
+      <button class="backbtn" onclick="show('keyin')">←</button>
+      <h1>Hmm, close but&nbsp;no.</h1>
+      <p class="sub" id="typoSub">We couldn't find an exact match. Is it one of these?</p>
+      <div id="suggestList"></div>
+      <button class="btn secondary small" onclick="goCreateNewProfile()">That's not me - create a new profile</button>
+      <div class="spacer"></div>
+    </div>
+
+    <!-- 3b. Not found: new attendee -->
+    <div class="screen" data-screen="newattendee">
+      <button class="backbtn" onclick="show('keyin')">←</button>
+      <h1>Welcome!</h1>
+      <p class="sub">You're new here - tell us a bit about your work so we can match you.</p>
+      <label>Interests / research areas</label>
+      <textarea id="inInterests" placeholder="e.g. cognitive ergonomics, aviation human factors..."></textarea>
+      <label>Short bio <span style="font-weight:400;">- tip: wrap text in **double asterisks** to bold it</span></label>
+      <textarea id="inBio" placeholder="One or two sentences about you"></textarea>
+      <label>Non-academic interests <span style="font-weight:400;">- optional, for the Side Interests view</span></label>
+      <textarea id="inSideInterest" placeholder="e.g. fountain pens, mechanical keyboards, running"></textarea>
+      <div class="spacer"></div>
+      <button class="btn" onclick="createNewProfile()">Build my profile</button>
+    </div>
+
+    <!-- 3c. Drafting: a web-search-backed starting bio, while the person waits -->
+    <div class="screen" data-screen="drafting">
+      <div class="center" style="margin-top:100px;">
+        <div style="font-size:52px; margin-bottom:16px;" id="draftingEmoji">💭</div>
+        <h1 id="draftingText">Dreaming&hellip;</h1>
+        <p class="sub">Looking for a starting point for your profile - you'll get to review and
+          change anything before it's saved.</p>
+      </div>
+    </div>
+
+    <!-- 3c. Placing a new/edited profile on the map. Polls /api/placement (see waitForPlacement())
+         so people wait ~a minute here with a clear status instead of landing on Home with a
+         placeholder dot and keyword-overlap matches. -->
+    <div class="screen" data-screen="placing">
+      <div class="center" style="margin-top:80px;">
+        <img src="img-asset/peapod-mascot-v2.png" alt="" style="width:140px; height:auto; display:block; margin:0 auto 12px; animation:dreamyFloat 1.8s ease-in-out infinite;">
+        <h1 id="placingTitle">Teleporting you in&hellip;</h1>
+        <p class="sub">Adding you to the map and finding your matches. This takes a few seconds.</p>
+        <div class="map-loading active" style="position:static; margin-top:10px;" aria-label="Please wait"><span></span><span></span><span></span></div>
+      </div>
+    </div>
+
+    <!-- 3d. Data failed to load entirely (not a normal "no data yet" state) -->
+    <div class="screen" data-screen="loaderror">
+      <div class="center" style="margin-top:100px;">
+        <div style="font-size:52px; margin-bottom:16px;">&#128546;</div>
+        <h1>Couldn't load matches</h1>
+        <p class="sub">Refreshing usually fixes this. If it keeps happening, please contact the authors.</p>
+        <button class="btn secondary small" onclick="location.reload()">Refresh</button>
+      </div>
+    </div>
+
+    <!-- 4. Prepopulated profile (found) -->
+    <div class="screen" data-screen="profile">
+      <button class="backbtn" onclick="show('keyin')">←</button>
+      <div class="center" style="margin-top:8px;">
+        <div class="avatar" id="profAvatar"></div>
+        <div class="banner found">✓ Profile found - review &amp; confirm</div>
+      </div>
+      <div class="profile-field">
+        <label>Name</label>
+        <input type="text" id="profName" readonly>
+        <label>Affiliation</label>
+        <input type="text" id="profAff" readonly>
+        <label>Profile <span id="profBioHint" style="font-weight:400;">- tip: wrap text in **double asterisks** to bold it</span></label>
+        <textarea id="profBio" readonly></textarea>
+        <div id="profBioView" style="display:none; white-space:pre-line; text-align:left; font-size:15px; color:var(--ink); padding:2px 0;"></div>
+        <label>Non-academic interests <span id="profSideHint" style="font-weight:400;">- optional, for the Side Interests view</span></label>
+        <textarea id="profSideInterest" readonly placeholder="None"></textarea>
+        <label id="studentQuestionRow" style="display:flex; align-items:center; gap:8px; margin-top:12px; cursor:pointer;">
+          <input type="checkbox" id="profIsStudent" style="width:auto;">
+          I'm a student
+        </label>
+      </div>
+      <div class="spacer"></div>
+      <div style="display:flex; gap:10px; margin-top:16px;" id="profileActions"></div>
+      <button class="btn ghost small" onclick="goCreateNewProfile()">That's not me - create a new profile</button>
+      <p style="font-size:11px; color:var(--gray); margin:8px 0 0;">Saved locally in this browser only - clearing your browser data/history will sign you out and you'll need to look yourself up again.</p>
+    </div>
+
+    <!-- 5. Home -->
+    <div class="screen" data-screen="home">
+      <div class="banner warn" id="syncNotice" style="display:none; margin:-4px 0 12px;"></div>
+      <div class="topbar">
+        <h1>Matches</h1>
+        <div style="display:flex; align-items:center; gap:8px;">
+          <button class="btn ghost small" id="viewModeToggle" style="padding:6px 10px; border:1.5px solid var(--purple); border-radius:20px; white-space:nowrap;" onclick="openViewModePicker()"></button>
+          <button class="faq-btn" onclick="openFaq()" aria-label="Help / FAQ" title="Help / FAQ">?</button>
+          <button class="profile-pill" id="homeAvatarBtn" aria-label="Your profile" onclick="openMe()"></button>
+        </div>
+      </div>
+      <input type="text" id="searchInput" placeholder="Search attendees by name..." aria-label="Search attendees by name" oninput="runSearch()" style="margin-bottom:8px;">
+      <div id="searchResults"></div>
+      <div class="section-divider"></div>
+      <div id="sideViewPlaceholder" style="display:none; text-align:center; padding:40px 16px;">
+        <div style="font-size:44px; margin-bottom:10px;">🖋️</div>
+        <div style="font-weight:700; font-size:16px; margin-bottom:6px;">Oops, not enough people yet!</div>
+        <div style="font-size:13px; color:var(--gray); max-width:280px; margin:0 auto;">We need at least <span id="sideViewMinCount"></span> people to have added their side interests before this view is worth showing. Check back later, add yours from your profile - and let your friends know!</div>
+      </div>
+      <div id="matchesAndMap">
+        <div class="umap-card">
+          <div class="map-header">
+            <div class="cap">Attendee interest map</div>
+            <div class="map-controls" aria-label="Map zoom controls">
+              <button class="map-control" onclick="zoomUmap(-1)" aria-label="Zoom out">−</button>
+              <span class="zoom-label" id="umapZoomLabel">100%</span>
+              <button class="map-control" onclick="zoomUmap(1)" aria-label="Zoom in">+</button>
+              <button class="map-control" onclick="resetUmapZoom()" aria-label="Reset map zoom" title="Reset zoom">↺</button>
+            </div>
+          </div>
+          <div class="map-explainer" id="mapExplainer">A map of everyone's interests - people working on similar things end up closer together. It's not geography, just how alike people's research focus is.</div>
+          <div id="sideViewSelfNotice" style="display:none; font-size:12px; color:var(--gray); margin:6px 4px 0;">You haven't added your side interests yet - edit your profile to appear on this map.</div>
+          <div class="map-stage">
+            <svg viewBox="0 0 320 190" width="100%" height="170" id="umapSvg" role="img" aria-label="Map of attendees arranged by research similarity. Your closest matches are listed below the map."></svg>
+            <div class="map-loading" id="mapLoading" aria-label="Loading map"><span></span><span></span><span></span></div>
+          </div>
+          <div class="cap" id="embeddingsUpdated" style="margin:6px 4px 0; font-weight:400;"></div>
+        </div>
+        <div class="list-title"><span aria-hidden="true">⭐</span> Top matches for you</div>
+        <div id="topMatches"></div>
+        <div id="topMatchesMore"></div>
+      </div>
+      <div id="programSection">
+        <div class="list-title"><span aria-hidden="true">🗓️</span> Top programs for you</div>
+        <div id="topLectures"></div>
+        <div id="topLecturesMore"></div>
+      </div>
+    </div>
+
+    <!-- View mode picker: one shared trigger for Everyone / Students / Non-academic, instead
+         of separate always-visible toggle buttons crowding the topbar. -->
+    <div class="overlay" id="viewModeOverlay" onclick="closeViewModePickerBg(event)">
+      <div class="bubble" style="max-width:340px;">
+        <div class="sticky-header">
+          <button class="closebubble" aria-label="Close" onclick="closeViewModePicker()">✕</button>
+          <h2 style="margin:0;">View</h2>
+        </div>
+        <div id="viewModeOptions" style="display:flex; flex-direction:column; gap:8px;"></div>
+      </div>
+    </div>
+
+    <!-- FAQ overlay -->
+    <div class="overlay" id="faqOverlay" onclick="closeFaqBg(event)">
+      <div class="bubble">
+        <div class="sticky-header">
+          <button class="closebubble" aria-label="Close" onclick="closeFaq()">✕</button>
+          <h2 style="margin:0;">FAQ</h2>
+        </div>
+        <div style="text-align:left; font-size:13px; color:var(--bio); line-height:1.5;">
+          <img src="img-asset/peapod-mascot-v2.png" alt="" style="display:block; width:120px; height:auto; margin:2px auto 14px;">
+          <div class="faq-item">
+            <div class="faq-q">What is this app?</div>
+            <div class="faq-a">A quick way to find people and talks at CHI that match your interests.
+              It reads everyone's conference bio and quietly suggests attendees and sessions you might want to check
+              out. No separate account or sign-up needed.</div>
+          </div>
+          <div class="faq-item">
+            <div class="faq-q">How is the Attendee Interest Map generated?</div>
+            <div class="faq-a">We turn each person's bio into a set of numbers that captures what their work is
+              about, then compress those numbers down to two dimensions so they can be plotted as dots. People
+              working on similar things end up closer together. It's not a real place, just a visual way of
+              grouping similar interests.
+              <br><br>
+              For anyone who wants the technical terms: each bio is turned into an "embedding," a list of numbers
+              produced by a language model that captures the meaning of the text. We then use a technique called
+              UMAP (Uniform Manifold Approximation and Projection) to reduce that long list down to just two numbers
+              (an x and a y), while trying to keep similar profiles close together the way they were in the original,
+              higher-dimensional list. Those two numbers are what get plotted as the dot you see on the map.</div>
+          </div>
+          <div class="faq-item">
+            <div class="faq-q">How are Top Matches generated?</div>
+            <div class="faq-a">We compare your interest-numbers (see above) to everyone else's and rank people by
+              how similar they are. The closest ones show up as your Top Matches.
+              <br><br>
+              Your own co-authors are intentionally left out of this list - you should already be familiar with
+              them, so surfacing them as a "match" isn't useful. Everyone else you haven't co-authored with is
+              still eligible.</div>
+          </div>
+          <div class="faq-item">
+            <div class="faq-q">How can I actually meet or message someone I find here?</div>
+            <div class="faq-a">There's no messaging in this app on purpose: it's meant to point you toward
+              people worth meeting in person, not replace that conversation. Think of it as a little
+              scavenger hunt: their affiliation and contribution can tell you where to look, and if they're
+              presenting, their session is a natural place to catch them. You can also ask around: if you
+              know their affiliation or the technical group/committee they're part of (e.g., CEDM, HART, and
+              the like), someone there likely knows them and can introduce you. Half the fun of a conference
+              is asking around and making a new friend that way :)</div>
+          </div>
+          <div class="faq-item">
+            <div class="faq-q">How are Top Programs generated?</div>
+            <div class="faq-a">Same idea, but comparing your interests to each talk or poster's title, to suggest
+              sessions you might not want to miss.</div>
+          </div>
+          <div class="faq-item">
+            <div class="faq-q">Is there any data collected?</div>
+            <div class="faq-a">Yes, kept to the minimum needed to run the app: when someone new joins the list, or
+              edits their name, affiliation, or bio, we log that change: the date/time and the associated
+              information. We do not log IP addresses, clicks, searches, or map interactions. Anonymous feedback
+              (the "Share anonymous feedback" button) is logged too: just the message text and when it was sent,
+              with nothing that identifies who sent it.</div>
+          </div>
+          <div class="faq-item">
+            <div class="faq-q">How do I remove myself from this app?</div>
+            <div class="faq-a">Everyone on this list is already listed in the official CHI conference
+              program, and that's how your name got here. If you'd like to be removed from this app specifically,
+              contact us below and we'll take care of it.</div>
+          </div>
+          <div class="faq-item">
+            <div class="faq-q">Who do I contact with concerns?</div>
+            <div class="faq-a">Vianney Renata (<a href="mailto:vrenata@wisc.edu">vrenata@wisc.edu</a>), or
+              <br>John D. Lee (<a href="mailto:jdlee@engr.wisc.edu">jdlee@engr.wisc.edu</a>).</div>
+          </div>
+          <div class="faq-item">
+            <div class="faq-q">Can I reuse the peapod illustration?</div>
+            <div class="faq-a">The peapod illustration is &copy; 2026 Vianney Renata and is licensed under
+              <a href="https://creativecommons.org/licenses/by-nc-nd/4.0/" target="_blank" rel="noopener">CC BY-NC-ND 4.0</a>:
+              you may share it unchanged, for non-commercial purposes, with credit to Vianney Renata, but you may not modify it or create derivative works.</div>
+          </div>
+          <div class="faq-item">
+            <div class="faq-q">When does this app go away?</div>
+            <div class="faq-a">This app is temporary for the conference. It will be shut down at the end of CHI
+              2027: Friday, May 14, 2027, 11:59 PM Pittsburgh (Eastern) time. After that, it won't be
+              accessible.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="overlay" id="feedbackOverlay" onclick="closeFeedbackBg(event)">
+      <div class="bubble">
+        <button class="closebubble" aria-label="Close" onclick="closeFeedback()">✕</button>
+        <h2 style="margin:0 0 6px;">Quick feedback</h2>
+        <p class="sub" style="margin-bottom:12px;">This is anonymous. We do not collect your name, profile, session, or IP address with your response.</p>
+        <textarea id="feedbackText" maxlength="2000" placeholder="What worked well, what was confusing, or what should we improve?"></textarea>
+        <p id="feedbackStatus" class="sub" style="margin:8px 0;"></p>
+        <button class="btn" onclick="submitFeedback()">Send feedback</button>
+      </div>
+    </div>
+
+    <!-- saved contacts overlay -->
+    <div class="overlay" id="savedOverlay" onclick="closeSavedOverlayBg(event)">
+      <div class="bubble">
+        <div class="sticky-header">
+          <button class="closebubble" aria-label="Close" onclick="closeSavedOverlay()">✕</button>
+          <h2 style="margin:0;">Saved Contacts</h2>
+        </div>
+        <div id="savedList"></div>
+      </div>
+    </div>
+
+    <!-- saved program overlay -->
+    <div class="overlay" id="savedProgramsOverlay" onclick="closeSavedProgramsOverlayBg(event)">
+      <div class="bubble">
+        <div class="sticky-header">
+          <button class="closebubble" aria-label="Close" onclick="closeSavedProgramsOverlay()">✕</button>
+          <h2 style="margin:0;">Saved Programs</h2>
+        </div>
+        <div id="savedProgramsList"></div>
+      </div>
+    </div>
+
+    <!-- program detail popup overlay -->
+    <div class="overlay" id="programOverlay" onclick="closeProgramOverlayBg(event)">
+      <div class="bubble">
+        <button class="closebubble" aria-label="Close" onclick="closeProgramOverlay()">✕</button>
+        <div style="font-weight:700; font-size:16px; text-align:left; padding-right:28px;" id="progTitle"></div>
+        <div style="font-size:12px; color:var(--gray); text-align:left; margin-top:6px;" id="progWhen"></div>
+        <div style="font-size:12px; color:var(--gray); text-align:left; margin-top:2px;" id="progSession"></div>
+        <div style="font-size:13px; text-align:left; margin-top:12px;" id="progAuthors"></div>
+        <div class="bubble-actions" id="progActions" style="margin-top:16px;"></div>
+      </div>
+    </div>
+
+    <!-- bubble popup overlay -->
+    <div class="overlay" id="overlay" onclick="closeOverlayBg(event)">
+      <div class="bubble">
+        <div class="bubble-top sticky-header">
+          <button class="closebubble" aria-label="Close" onclick="closeOverlay()">✕</button>
+          <div class="avatar" id="bubAvatar" style="width:56px;height:56px;font-size:18px;margin:0;"></div>
+          <div>
+            <div style="font-weight:700; font-size:16px; text-align:left; padding-right:24px;" id="bubName"></div>
+            <div style="font-size:12px; color:var(--gray); text-align:left; padding-right:24px;" id="bubAff"></div>
+          </div>
+        </div>
+        <p style="font-size:13px; color:var(--bio); text-align:left; white-space:pre-line;" id="bubBio"></p>
+        <div class="presenting" id="bubPresenting" style="display:none;"></div>
+        <div class="bubble-actions" id="bubActions"></div>
+        <div id="bubExtra" style="margin-top:8px;"></div>
+      </div>
+    </div>
+  </div>
+  <button class="feedback-link" onclick="openFeedback()">Share anonymous feedback</button>
+  <!-- Required by the feed licence (chidigitalexperience.org/programme-data). -->
+  <p class="map-explainer" style="text-align:center; margin-top:10px;">Programme data © ACM CHI, licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" style="color:inherit;">CC BY-NC-SA 4.0</a></p>
+</div>
+
+<script>
+// ---------- data ----------
+const CLUSTERS = {
+  hri:   {label:'Human-Robot Interaction / General HF', color:'#7B61FF'},
+  aviation: {label:'Aviation', color:'#2fb894'},
+  auto:  {label:'Automotive HMI', color:'#ff9f43'},
+  health:{label:'Healthcare Ergonomics', color:'#ef5da8'},
+};
+const CLUSTER_CENTERS = { hri:{x:130,y:50}, aviation:{x:245,y:105}, auto:{x:75,y:150}, health:{x:45,y:85} };
+
+// No fictional placeholder people — empty until loadRealData() fetches the real CSVs/JSON.
+// A fetch failure (e.g. opened as a file:// page, or the server being down) leaves these
+// empty rather than showing made-up attendees; renderHome() only renders whoever's here.
+let ATTENDEES = [];
+let COAUTHORS = new Map();  // personId -> Set of co-author personIds; built in loadRealData()
+let LECTURES = [];
+let AFFILIATIONS = [];
+let EMBEDDINGS_GENERATED_AT = null;
+
+const CACHE_KEY = 'hfes_match_profile';
+const SAVED_KEY = 'hfes_match_saved';
+const SAVED_PROGRAMS_KEY = 'hfes_match_saved_programs';
+let currentUser = null;
+let pendingSuggestions = [];
+let currentBubblePerson = null;
+let umapZoom = 1;
+let umapPanX = 0;
+let umapPanY = 0;
+let umapDragMoved = false;
+let highlightedPersonKey = null;
+let matchVisibleCount = 3;
+let lectureVisibleCount = 3;
+let loadedMatchCandidates = null;
+let loadedMatchTotal = 0;
+// studentViewOn/sideViewOn are derived, mutually-exclusive flags kept in sync by setViewMode()
+// below — most of the rendering code (renderHome, showMoreMatches, openBubble, matchScore
+// callers) reads these two booleans directly rather than a single 'viewMode' string, so they
+// stay as the source of truth other functions branch on.
+let studentViewOn = false;
+let sideViewOn = false;
+let viewMode = 'everyone'; // 'everyone' | 'student' | 'side' — drives the View picker's UI only
+// Purely a UX floor for the placeholder screen ("come back later") — distinct from
+// embed_umap.py's MIN_SPACE_PEOPLE=2, which is the hard floor UMAP needs to not crash.
+// Below this the side map/matches would technically render but look sparse and arbitrary.
+const SIDE_VIEW_MIN_PEOPLE = 10;
+let SIDE_EMBEDDED_COUNT = 0;
+
+// One shared "View" trigger + picker sheet instead of separate always-visible toggle
+// buttons (Student View, Side Interests) crowding the topbar — see openViewModePicker().
+const VIEW_MODE_META = {
+  everyone: { label: '👥 Academic', sub: 'Matches based on research interests - everyone at the conference.' },
+  student:  { label: '🎓 Student', sub: 'Only match with other students.' },
+  side:     { label: '🖋️ Hobby', sub: 'Hobbies and non-research interests, not conference topics.' },
+};
+function setViewToggleText(){
+  const t = document.getElementById('viewModeToggle'), label = VIEW_MODE_META[viewMode].label;
+  t.textContent = label + ' ▾';
+  t.setAttribute('aria-label', 'View: ' + label.replace(/^\S+\s/, '') + '. Change view'); // no emoji read aloud
+}
+function openViewModePicker(){
+  const modes = ['everyone', ...(currentUser.isStudent ? ['student'] : []), 'side'];
+  document.getElementById('viewModeOptions').innerHTML = modes.map(m => {
+    const meta = VIEW_MODE_META[m];
+    const active = m === viewMode;
+    return `<button class="btn ${active ? '' : 'secondary'}" style="text-align:left; padding:12px 16px;" onclick="setViewMode('${m}')">
+      <div style="font-weight:700;">${meta.label}${active ? ' ✓' : ''}</div>
+      <div style="font-weight:400; font-size:12px; opacity:.85; margin-top:2px;">${meta.sub}</div>
+    </button>`;
+  }).join('');
+  document.getElementById('viewModeOverlay').classList.add('active');
+}
+function closeViewModePicker(){ document.getElementById('viewModeOverlay').classList.remove('active'); }
+function closeViewModePickerBg(e){ if (e.target.id === 'viewModeOverlay') closeViewModePicker(); }
+
+async function setViewMode(mode){
+  closeViewModePicker();
+  if (mode === viewMode) return;
+  viewMode = mode;
+  studentViewOn = mode === 'student';
+  sideViewOn = mode === 'side';
+  document.body.classList.toggle('student-view', studentViewOn);
+  document.body.classList.toggle('side-view', sideViewOn);
+  // Both filtered views need the map/matches pre-filtered by the server (client-side filtering
+  // of just the top-5 baked matches would often show zero results) — drop whatever's loaded
+  // and re-fetch the first page with the right filter applied.
+  loadedMatchCandidates = null; loadedMatchTotal = 0; matchVisibleCount = 3;
+  if (studentViewOn && currentUser?.personId){
+    try {
+      const data = await api(`/api/matches?personId=${encodeURIComponent(currentUser.personId)}&offset=0&limit=50&studentOnly=1`);
+      loadedMatchCandidates = data.matches; loadedMatchTotal = data.total;
+    } catch (_) { /* fall back to client-side filtering of whatever's cached */ }
+  } else if (sideViewOn && currentUser?.personId && SIDE_EMBEDDED_COUNT >= SIDE_VIEW_MIN_PEOPLE){
+    try {
+      const data = await api(`/api/matches?personId=${encodeURIComponent(currentUser.personId)}&offset=0&limit=50&space=side`);
+      loadedMatchCandidates = data.matches; loadedMatchTotal = data.total;
+    } catch (_) { /* fall back to client-side sideTopMatches, if any */ }
+  }
+  renderHome();
+}
+async function api(path, options={}){
+  const response = await fetch(path, {
+    credentials:'same-origin',
+    headers:{'Content-Type':'application/json', ...(options.headers||{})},
+    ...options,
+  });
+  if (!response.ok) throw new Error(`API ${response.status}`);
+  return response.json();
+}
+// Edits are saved on this device instantly; reaching the server can fail (conference Wi-Fi,
+// server restart). Rather than silently dropping the edit — the person would think everyone can
+// see their new bio when nobody can — remember that it's unsent, say so, and retry when the
+// browser comes back online / the page is next opened.
+const PENDING_PUBLISH_KEY = 'hfes_match_pending_publish';
+async function publishProfileEdit(){
+  try {
+    const data = await api('/api/profile', {method:'POST', body:JSON.stringify(currentUser)});
+    // New signups begin without a conference person ID. Retain the API's
+    // generated profile ID: the next full rebuild uses that same value as the
+    // attendee ID in the CSV/UMAP, letting this browser reconnect to its dot.
+    if (!currentUser.personId && data?.profile?.profileId){
+      currentUser = {...currentUser, personId:data.profile.profileId};
+      persistLocalProfile();
+    }
+    localStorage.removeItem(PENDING_PUBLISH_KEY);
+    setSyncNotice('');
+    return true;
+  } catch (_) {
+    localStorage.setItem(PENDING_PUBLISH_KEY, '1');
+    setSyncNotice("Saved on this device, but we couldn't reach the server - we'll retry automatically.");
+    return false;
+  }
+}
+// ---------- placement wait ----------
+// A signup or bio edit queues ONE incremental placement server-side (HFES_AUTO_REBUILD_SECONDS quiet
+// window, 30s in production, plus a ~30s job). Hold people on the "Creating/Updating your profile…"
+// screen and poll /api/placement until their real dot + matches exist, then land on Home with those
+// in hand. "Placed" for an edit = the server's updated_at stamp differs from the one read BEFORE
+// publishing (no client/server clock comparison). Gives up after PLACEMENT_MAX_MS and lands on Home
+// anyway; the existing "takes a few minutes… check back shortly" note covers that case.
+const PLACEMENT_POLL_MS = 1000, PLACEMENT_MAX_MS = 180000;  // ~1 s per poll: with the warm worker a placement lands in a few seconds
+async function placementStamp(){
+  try { const d = await api(`/api/placement?personId=${encodeURIComponent(currentUser.personId)}`); return d.placed ? d.updatedAt : null; }
+  catch (_) { return null; }
+}
+async function waitForPlacement(mode, prevStamp){
+  document.getElementById('placingTitle').innerHTML = mode === 'update' ? 'Moving your dot&hellip;' : 'Teleporting you in&hellip;';
+  show('placing');
+  const t0 = Date.now();
+  while (Date.now() - t0 < PLACEMENT_MAX_MS){
+    await new Promise(r => setTimeout(r, PLACEMENT_POLL_MS));
+    let d = null;
+    try { d = await api(`/api/placement?personId=${encodeURIComponent(currentUser.personId)}`); } catch (_) {}
+    if (d && d.placed && d.updatedAt !== prevStamp){
+      const b = d.bounds;  // same scaling as loadRealData()'s scaleX/scaleY
+      currentUser = {...currentUser,
+        x: 15 + (d.x - b.xMin) / ((b.xMax - b.xMin) || 1) * 290,
+        y: 15 + (d.y - b.yMin) / ((b.yMax - b.yMin) || 1) * 160,
+        topMatches: d.topMatches};
+      persistLocalProfile();
+      loadedMatchCandidates = null;
+      break;
+    }
+  }
+  renderHome();
+  show('home');
+}
+function setSyncNotice(text){
+  const el = document.getElementById('syncNotice');
+  el.textContent = text; el.style.display = text ? 'block' : 'none';
+}
+async function retryPendingPublish(){
+  if (currentUser && localStorage.getItem(PENDING_PUBLISH_KEY)) await publishProfileEdit();
+}
+window.addEventListener('online', retryPendingPublish);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) retryPendingPublish(); });
+
+function initials(name){ return name.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase(); }
+
+// Security boundary: name/aff/bio are user-supplied via POST /api/profile and rendered for EVERY
+// visitor — every innerHTML interpolation of them must go through here (stored-XSS fix, 2026-09-18).
+function escapeHtml(s){
+  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+// Bios (s_profile, or anyone's self-typed edit) can contain **word** — render that as real
+// bold. Escape first so a self-typed bio can't inject markup; only ** pairs we wrap ourselves.
+function renderBio(bio){
+  return escapeHtml(bio).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+}
+
+// Keep the signed-in profile in this browser. This is intentionally local-only:
+// the app can still open it on a later visit even if the API is temporarily down.
+function persistLocalProfile(){
+  if (!currentUser) return false;
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(currentUser));
+    return true;
+  } catch (error) {
+    console.warn('Could not save the local profile.', error);
+    return false;
+  }
+}
+
+// ---------- saved contacts (stored locally, keyed by Person ID so same-name people don't collide) ----------
+function personKey(p){ return p.personId || p.name; }
+function getSavedIds(){ try { return JSON.parse(localStorage.getItem(SAVED_KEY)) || []; } catch { return []; } }
+function setSavedIds(ids){ localStorage.setItem(SAVED_KEY, JSON.stringify(ids)); }
+function isSaved(p){ return getSavedIds().includes(personKey(p)); }
+function toggleSave(p){
+  const key = personKey(p);
+  const ids = getSavedIds();
+  const idx = ids.indexOf(key);
+  if (idx === -1) ids.push(key); else ids.splice(idx, 1);
+  setSavedIds(ids);
+  return idx === -1; // true if now saved
+}
+
+// ---------- saved program (stored locally, keyed by Presentation ID) ----------
+function getSavedProgramIds(){ try { return JSON.parse(localStorage.getItem(SAVED_PROGRAMS_KEY)) || []; } catch { return []; } }
+function setSavedProgramIds(ids){ localStorage.setItem(SAVED_PROGRAMS_KEY, JSON.stringify(ids)); }
+function isProgramSaved(l){ return getSavedProgramIds().includes(l.id); }
+function toggleSaveProgram(l){
+  const ids = getSavedProgramIds();
+  const idx = ids.indexOf(l.id);
+  if (idx === -1) ids.push(l.id); else ids.splice(idx, 1);
+  setSavedProgramIds(ids);
+  return idx === -1; // true if now saved
+}
+function timeToMinutes(t){
+  const m = (t||'').match(/(\d{1,2}):(\d{2})\s*([ap]m)/i);
+  if (!m) return 0;
+  let h = parseInt(m[1],10) % 12;
+  if (m[3].toLowerCase()==='pm') h += 12;
+  return h*60 + parseInt(m[2],10);
+}
+
+// ---------- real conference data (loaded from the CSVs in this folder) ----------
+function parseCSV(text){
+  const rows = [];
+  let field = '', row = [], inQuotes = false;
+  for (let i=0; i<text.length; i++){
+    const c = text[i];
+    if (inQuotes){
+      if (c === '"'){
+        if (text[i+1] === '"'){ field += '"'; i++; } else { inQuotes = false; }
+      } else field += c;
+    } else if (c === '"'){ inQuotes = true; }
+    else if (c === ','){ row.push(field); field=''; }
+    else if (c === '\n'){ row.push(field); rows.push(row); row=[]; field=''; }
+    else if (c !== '\r'){ field += c; }
+  }
+  if (field || row.length){ row.push(field); rows.push(row); }
+  const header = rows[0];
+  return rows.slice(1).filter(r=>r.length===header.length).map(r=>{
+    const obj = {};
+    header.forEach((h,i)=> obj[h]=r[i]);
+    return obj;
+  });
+}
+
+function classify(text){
+  const t = (text||'').toLowerCase();
+  if (/aviation|aircraft|cockpit|pilot|air traffic|flight deck/.test(t)) return 'aviation';
+  if (/vehicle|driver|automotive|driving/.test(t)) return 'auto';
+  if (/health|clinical|patient|medical|surgical|hospital|nurse/.test(t)) return 'health';
+  return 'hri';
+}
+
+function hashCode(s){ let h=0; for(let i=0;i<s.length;i++) h=(h*31 + s.charCodeAt(i))|0; return h; }
+
+// "Schedule Detail" packs date/time/location/session/title/role into one generated string
+// ("2026-10-20 1:50 pm-2:10 pm · Nevada 6/7 · Session Name · Title [Role]") — pull it apart into
+// real fields instead of showing the raw blob. Verified against all 2,488 entries in the CSV.
+const SCHEDULE_RE = /^(\d{4}-\d{2}-\d{2}) (\d{1,2}:\d{2} ?[ap]m-\d{1,2}:\d{2} ?[ap]m) · ([^·]+) · ([^·]+) · (.+) \[([^\]]+)\]$/;
+function parseScheduleDetail(entry){
+  const m = entry.match(SCHEDULE_RE);
+  if (!m) return null;
+  const [, date, timeRange, location, sessionName, title, role] = m;
+  const [startTime, endTime] = timeRange.split('-').map(s=>s.trim());
+  return { date, startTime, endTime, location: location.trim(), sessionName: sessionName.trim(), title: title.trim(), role: role.trim() };
+}
+function fmtDate(dateStr){
+  return new Date(dateStr+'T12:00:00').toLocaleDateString('en-US', {weekday:'long', month:'short', day:'numeric'});
+}
+// program.csv already gives Day/Date/Start Time/End Time as separate columns — just format, no parsing needed
+function fmtProgramWhen(l){
+  const monthDay = new Date(l.date+'T12:00:00').toLocaleDateString('en-US', {month:'short', day:'numeric'});
+  return `${l.day}, ${monthDay} · ${l.startTime}–${l.endTime}${l.location ? ' · '+l.location : ''}`;
+}
+
+function deterministicPos(name, cluster){
+  const h = hashCode(name);
+  const jx = (h % 200) - 100, jy = ((h>>4) % 140) - 70;
+  const c = CLUSTER_CENTERS[cluster] || CLUSTER_CENTERS.hri;
+  return { x: Math.min(310, Math.max(10, c.x + jx*0.5)), y: Math.min(180, Math.max(10, c.y + jy*0.5)) };
+}
+
+async function loadRealData(){
+  try {
+    // cache:'no-cache' forces a revalidation with the server on every page load instead of
+    // silently reusing this browser's own local cache — so a refresh always at least checks
+    // for newer data rather than showing yesterday's. Only applied to the two files that can
+    // actually change mid-conference (new signups/edits get folded into both). CHI's programme
+    // changes too (chi_feed.py re-syncs it from the live feed), so program.csv revalidates as well.
+    // (This only controls THIS browser's local cache; CloudFront's edge cache is a separate layer.)
+    const noCache = {cache: 'no-cache'};
+    const [authorsText, programText, embeddingsData, sideEmbeddingsData] = await Promise.all([
+      fetch('authors.csv', noCache).then(r=>r.text()),
+      fetch('program.csv', noCache).then(r=>r.text()),
+      // real embeddings + precomputed top-5 nearest matches, baked offline by embed_umap.py — plain
+      // static JSON, no server/model needed to read it. Missing file just means no real-embeddings yet.
+      fetch('umap_positions.json', noCache).then(r=> r.ok ? r.json() : null).catch(()=>null),
+      // Side Interests: a second, independent embedding space (see embed_umap.py) — only exists once
+      // at least a couple of people have opted in and a full rebuild has run. Missing = nobody yet.
+      fetch('side_umap_positions.json', noCache).then(r=> r.ok ? r.json() : null).catch(()=>null),
+    ]);
+
+    const embByPerson = new Map();
+    if (embeddingsData && embeddingsData.people && embeddingsData.people.length){
+      EMBEDDINGS_GENERATED_AT = embeddingsData.generated_at;
+      const xs = embeddingsData.people.map(p=>p.x), ys = embeddingsData.people.map(p=>p.y);
+      const xMin = Math.min(...xs), xMax = Math.max(...xs), yMin = Math.min(...ys), yMax = Math.max(...ys);
+      const scaleX = x => 15 + (x - xMin) / ((xMax - xMin) || 1) * 290;
+      const scaleY = y => 15 + (y - yMin) / ((yMax - yMin) || 1) * 160;
+      embeddingsData.people.forEach(p=>{
+        embByPerson.set(p.person_id, { x: scaleX(p.x), y: scaleY(p.y), topMatches: p.top_matches || [] });
+      });
+    }
+    const sideEmbByPerson = new Map();
+    SIDE_EMBEDDED_COUNT = (sideEmbeddingsData && sideEmbeddingsData.people) ? sideEmbeddingsData.people.length : 0;
+    if (sideEmbeddingsData && sideEmbeddingsData.people && sideEmbeddingsData.people.length){
+      const xs = sideEmbeddingsData.people.map(p=>p.x), ys = sideEmbeddingsData.people.map(p=>p.y);
+      const xMin = Math.min(...xs), xMax = Math.max(...xs), yMin = Math.min(...ys), yMax = Math.max(...ys);
+      const scaleX = x => 15 + (x - xMin) / ((xMax - xMin) || 1) * 290;
+      const scaleY = y => 15 + (y - yMin) / ((yMax - yMin) || 1) * 160;
+      sideEmbeddingsData.people.forEach(p=>{
+        sideEmbByPerson.set(p.person_id, { x: scaleX(p.x), y: scaleY(p.y), topMatches: p.top_matches || [] });
+      });
+    }
+    // program.csv has clean, separate Date/Day/Start Time/End Time/Location/Program URL columns —
+    // prefer those over authors.csv's smashed "Schedule Detail" string wherever we can join to them.
+    // Join key: (author name, presentation title), both lowercased. This is a client-side join over
+    // two already-fetched CSVs — no server/SQL needed, just an in-memory Map (~717 rows, trivial).
+    const programs = parseCSV(programText);
+    // "University Lab Posters" is a standing session slot for departmental posters, not tied to a
+    // specific talk/author the way every other session is — drop it from the program entirely.
+    // Rows with no Presentation ID are conference-wide blocks (receptions, meetings, exhibit hall
+    // hours, award ceremonies) rather than personal presentations — not useful to recommend.
+    const talks = programs.filter(p=>p['Presentation Title'] && p['Session Type'] !== 'Registration'
+      && p['Session Name'] !== 'University Lab Posters' && p['Presentation ID']);
+    const programByKey = new Map();
+    talks.forEach(p=>{
+      const title = (p['Presentation Title']||'').trim();
+      if (!title) return;
+      (p['Authors']||'').split(';').map(s=>s.trim()).filter(Boolean).forEach(who=>{
+        programByKey.set(`${who.toLowerCase()}||${title.toLowerCase()}`, p);
+      });
+    });
+
+    LECTURES = talks.map(p=>({
+      id: p['Presentation ID'],
+      title: p['Presentation Title'],
+      sessionName: p['Session Name'], sessionType: p['Session Type'],
+      date: p['Date'], day: p['Day'], startTime: p['Start Time'], endTime: p['End Time'], location: p['Location'],
+      authors: (p['Authors']||'').split(';').map(s=>s.trim()).filter(Boolean),
+      presentingAuthors: (p['Presenting Author(s)']||'').split(';').map(s=>s.trim()).filter(Boolean),
+      programUrl: p['Program URL'],
+    }));
+
+    const authors = parseCSV(authorsText).filter(a=>a.Author);
+    // Co-author index (mirrors the one server.py's Catalogue.reload() builds — keep in sync):
+    // people sharing a presentation (title+date, any authorship role; Session Chair doesn't
+    // count) are co-authors, and get dropped from each other's ACADEMIC top matches — their
+    // bios describe the same papers, so embeddings rank them at the top, but "go meet your own
+    // labmate" is noise. Hobby matches are never filtered. Built from the pre-join parse, and
+    // before the University Lab Posters filter — lab-poster co-presenters are labmates too.
+    const presGroups = new Map();
+    ATTENDEES = authors.map(a=>{
+      // s_profile is the curated "**Headline**\nBody" bio, rendered with real bold by renderBio()
+      // — see openBubble(). Interest Profile is the older plain-text field, kept as a fallback.
+      const bio = a['s_profile'] || a['Interest Profile'] || a['Presentation Titles'] || 'No profile on file.';
+      const cluster = classify(bio);
+      // "Schedule Detail" still carries each person's own ROLE on a presentation (Co-Author, Presenting
+      // Author, ...), which program.csv doesn't have per-person — so parse it for that, but replace the
+      // date/time/location/title/link with the program.csv row when the join finds one (it does for
+      // ~94% of presentations; the rest quietly fall back to the Schedule Detail parse, no link).
+      const parsedPres = (a['Schedule Detail']||'').split('|').map(s=>s.trim()).filter(Boolean)
+        .map(entry => parseScheduleDetail(entry))
+        .filter(Boolean);
+      parsedPres.forEach(pres => {
+        if (pres.role === 'Session Chair') return;
+        const k = `${pres.title.toLowerCase()}|${pres.date}`;
+        if (!presGroups.has(k)) presGroups.set(k, []);
+        presGroups.get(k).push(a['Person ID']);
+      });
+      const presentations = parsedPres
+        .map(parsed => {
+          const row = programByKey.get(`${a.Author.toLowerCase()}||${parsed.title.toLowerCase()}`);
+          return row
+            ? { date: row['Date'], startTime: row['Start Time'], endTime: row['End Time'], location: row['Location'],
+                sessionName: row['Session Name'], title: row['Presentation Title'], role: parsed.role, programUrl: row['Program URL'] }
+            : { ...parsed, programUrl: null };
+        })
+        .filter(pres => pres.sessionName !== 'University Lab Posters');
+      const emb = embByPerson.get(a['Person ID']);
+      const sideEmb = sideEmbByPerson.get(a['Person ID']);
+      return {
+        personId: a['Person ID'], name: (a.Author||'').trim(), aff: (a.Affiliation||'').trim(),
+        bio,
+        // Optional non-academic "side interests" text — the Side Interests view's own bio-like
+        // field. Blank for most people (it's opt-in); see embed_umap.py's side_text()/SIDE_SPACE.
+        sideInterest: (a['Side Interest']||'').trim(),
+        // Internal-only tag (see CLAUDE.md) that powers Student View's map/match filtering —
+        // never rendered as a badge or label anywhere in the UI.
+        isStudent: (a['Is Student']||'').trim() === '1',
+        presentations,
+        cluster, ...(emb ? { x: emb.x, y: emb.y } : deterministicPos(a.Author, cluster)),
+        topMatches: emb ? emb.topMatches : null,
+        ...(sideEmb ? { sideX: sideEmb.x, sideY: sideEmb.y, sideTopMatches: sideEmb.topMatches } : {}),
+      };
+    });
+    COAUTHORS = new Map();
+    presGroups.forEach(ids => {
+      if (ids.length < 2) return;
+      ids.forEach(id => {
+        if (!COAUTHORS.has(id)) COAUTHORS.set(id, new Set());
+        ids.forEach(other => { if (other !== id) COAUTHORS.get(id).add(other); });
+      });
+    });
+    // split multi-affiliation rows ("Aptima, Inc.; Arizona State University") into separate options
+    // ponytail: light whitespace/hyphen cleanup only — near-duplicate spellings (e.g. "Aptima, Inc" vs
+    // "Aptima, Inc.", "University of Wisconsin" vs "...-Madison") still fork; fix with a canonical
+    // institution list if that becomes a real problem
+    AFFILIATIONS = [...new Set(
+      authors.flatMap(a => a.Affiliation.split(';'))
+        .map(s => s.trim().replace(/\s*-\s*/g,'-').replace(/\s+/g,' '))
+        .filter(Boolean)
+    )].sort();
+    renderAffOptions();
+    // A returning localStorage user can reach Home before the CSV/embedding
+    // requests finish. Hydrate them and redraw once the real projection arrives.
+    if (currentUser && document.querySelector('[data-screen="home"]').classList.contains('active')){
+      const onFile = ATTENDEES.find(p=>personKey(p)===personKey(currentUser));
+      if (onFile) currentUser = {...onFile, ...currentUser, x:onFile.x, y:onFile.y, topMatches:onFile.topMatches, sideX:onFile.sideX, sideY:onFile.sideY, sideTopMatches:onFile.sideTopMatches};
+      renderHome();
+    }
+  } catch(err){
+    // No fictional fallback data — ATTENDEES/LECTURES just stay empty. This is a real, total
+    // failure to load the app (not the normal "no data yet" state), so say so plainly instead
+    // of leaving people staring at a silently empty home screen, and let the authors know.
+    console.warn('Could not load HFES CSV data.', err);
+    show('loaderror');
+    api('/api/client-error', {method: 'POST', body: JSON.stringify({message: String(err && err.message || err)})}).catch(()=>{});
+  }
+}
+loadRealData();
+
+// ---------- navigation ----------
+function show(name){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.querySelector(`.screen[data-screen="${name}"]`).classList.add('active');
+}
+
+async function goSplashContinue(){
+  const cached = localStorage.getItem(CACHE_KEY);
+  if (cached){
+    try {
+      currentUser = JSON.parse(cached);
+    } catch (_) {
+      localStorage.removeItem(CACHE_KEY);
+      show('keyin');
+      return;
+    }
+    const onFile = ATTENDEES.find(p=>personKey(p)===personKey(currentUser));
+    if (onFile) currentUser = {...onFile, ...currentUser, x:onFile.x, y:onFile.y, topMatches:onFile.topMatches, sideX:onFile.sideX, sideY:onFile.sideY, sideTopMatches:onFile.sideTopMatches};
+    renderHome();
+    show('home');
+  } else {
+    show('keyin');
+  }
+}
+
+function restoreLocalProfileOnLoad(){
+  const cached = localStorage.getItem(CACHE_KEY);
+  if (!cached) return;
+  let parsed;
+  try {
+    parsed = JSON.parse(cached);
+  } catch (_) {
+    localStorage.removeItem(CACHE_KEY); // genuinely corrupt JSON — nothing to recover
+    return;
+  }
+  currentUser = parsed;
+  show('home');
+  if (localStorage.getItem(PENDING_PUBLISH_KEY)) setSyncNotice("Your last profile edit hasn't reached the server yet - retrying…");
+  retryPendingPublish();
+  // This can run before the CSV/embedding fetch in loadRealData() resolves, while ATTENDEES
+  // is still empty. Rendering then used to show 9 fictional placeholder people (Sarah Chen,
+  // Marcus Webb, ...) on a real user's map on every refresh, which read as broken, not fast
+  // — so skip the render entirely until real data has landed. loadRealData()'s own
+  // post-fetch hook re-renders Home once it does (usually well under a second).
+  if (ATTENDEES.length) {
+    try { renderHome(); } catch (_) { /* recovered by loadRealData() shortly after */ }
+  } else {
+    // HIG "Loading": show that something is happening rather than a silent blank Home.
+    document.getElementById('homeAvatarBtn').textContent = initials(currentUser.name);
+    setViewToggleText();
+    document.getElementById('topMatches').innerHTML = '<div class="empty-note">Loading your matches…</div>';
+    document.getElementById('topLectures').innerHTML = '<div class="empty-note">Loading your programs…</div>';
+    document.getElementById('mapLoading').classList.add('active');
+  }
+}
+
+// ---------- fuzzy match ----------
+function levenshtein(a, b){
+  a=a.toLowerCase(); b=b.toLowerCase();
+  const dp = Array.from({length:a.length+1},(_,i)=>[i,...Array(b.length).fill(0)]);
+  for(let j=0;j<=b.length;j++) dp[0][j]=j;
+  for(let i=1;i<=a.length;i++){
+    for(let j=1;j<=b.length;j++){
+      dp[i][j] = a[i-1]===b[j-1] ? dp[i-1][j-1] : 1+Math.min(dp[i-1][j-1],dp[i-1][j],dp[i][j-1]);
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+function renderSuggestList(candidates, subText){
+  document.getElementById('typoSub').textContent = subText;
+  pendingSuggestions = candidates;
+  const list = document.getElementById('suggestList');
+  list.innerHTML = '';
+  candidates.forEach((c, i)=>{
+    const row = document.createElement('button');
+    row.className = 'row';
+    row.style.cssText = 'width:100%; border:1px solid var(--line); font:inherit; cursor:pointer;';
+    row.onclick = () => acceptSuggestion(i);
+    row.innerHTML = `<div class="dot" style="background:var(--purple)"></div>
+      <div><div class="rowname">${escapeHtml(c.name)}</div><div class="rowsub">${escapeHtml(c.aff)}</div></div>`;
+    list.appendChild(row);
+  });
+  show('typo');
+}
+
+// true if typedAff is (loosely) one of the person's on-file affiliations — people can be
+// affiliated with more than one org ("Aptima, Inc.; Arizona State University"), and typing
+// just one of them still counts as a match
+function normalizeAff(s){
+  return s.trim().toLowerCase().replace(/\s*-\s*/g,'-').replace(/\s+/g,' ');
+}
+function renderAffOptions(){
+  const box = document.getElementById('affOptions');
+  if (!box || !AFFILIATIONS.length) return;
+  const query = document.getElementById('inAff').value.trim().toLowerCase();
+  if (!query){
+    box.innerHTML = '';
+    box.classList.remove('active');
+    return;
+  }
+  const options = AFFILIATIONS.filter(a=>!query || a.toLowerCase().includes(query)).slice(0, 30);
+  box.innerHTML = '';
+  options.forEach(aff=>{
+    const button = document.createElement('button');
+    button.type = 'button'; button.className = 'aff-option'; button.textContent = aff;
+    button.onmousedown = e=>e.preventDefault();
+    button.onclick = ()=>{ document.getElementById('inAff').value = aff; hideAffOptions(); };
+    box.appendChild(button);
+  });
+  box.classList.toggle('active', options.length > 0);
+}
+function hideAffOptions(){
+  setTimeout(()=>document.getElementById('affOptions').classList.remove('active'), 150);
+}
+function affMatches(person, typedAff){
+  const typed = normalizeAff(typedAff);
+  if(!typed) return true;
+  return person.aff.split(';').map(normalizeAff)
+    .some(part => part.includes(typed) || typed.includes(part));
+}
+
+// ---------- structured name matching: surname + a given name ----------
+// "Alicia Cheng" typed for `Xiaoxuan "Alicia" Cheng` on file, "Sung Ahn" for Sung Hee Ahn, "J. Lee" for
+// John D. Lee, "Jones" or "Smith-Jones" for a married/hyphenated surname: none of these are within a
+// few edits of the whole string, so the Levenshtein layer in lookup() misses them and the person is
+// routed to "create new profile" — which is how a real attendee ended up with a duplicate on
+// 2026-09-03. ~12% of attendees have three or more name words or a middle initial, so this is the
+// common case, not the nickname edge case. Rule: the SURNAME must match (the last word, either half
+// of a hyphenated one, or the second-to-last word for compound surnames) AND at least one GIVEN name
+// must match (any other word, or a nickname in quotes/parentheses; exact, initial, prefix, or one
+// edit). Deliberately generous, per the owner: a wrong suggestion costs one tap on "That's not me";
+// a missed match creates a duplicate attendee that persists in the data.
+function hyphenParts(w){ return w.includes('-') ? [w, ...w.split('-').filter(Boolean)] : [w]; }
+function nameParts(name){
+  const nick = [...name.matchAll(/["\u201c\u201d(]\s*([^"\u201c\u201d()]+?)\s*["\u201c\u201d)]/g)].map(m => m[1]);
+  const clean = str => str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9\s-]/g, ' ');
+  // Credentials/suffixes ride along in some on-file names ("Michael Byrne, Ph.D.") — drop them so the
+  // real surname is the last word.
+  // Only unambiguous forms: anything after a comma (", Ph.D."), or a punctuated/roman suffix after a
+  // space (" Jr.", " III"). A bare trailing "Md" is NOT stripped — it's a real given name (Md Kaiser
+  // Hamid Munna) when someone types family-name-first.
+  const noSuffix = name.replace(/,\s*(ph\.?\s?d\.?|m\.?d\.?|dr\.?|jr\.?|sr\.?|ii|iii|iv)\.?\s*$/i, '')
+                       .replace(/\s+(ph\.?\s?d\.|m\.d\.|jr\.|sr\.|ii|iii|iv)\s*$/i, '');
+  const words = clean(noSuffix.replace(/["\u201c\u201d(][^"\u201c\u201d()]*["\u201c\u201d)]/g, ' ')).split(/\s+/).filter(Boolean);
+  const surname = new Set(words.slice(-1).flatMap(hyphenParts));
+  if (words.length >= 3){
+    // Compound / double surnames ("Harris Adamson", "Munoz Gomez Andrade" — Spanish paternal surname is
+    // the SECOND word, and people often use it alone): every word after the first counts as a possible
+    // surname, except one-letter initials ("E.B. Floersch" → "e b floersch"), which are given names.
+    words.slice(1, -1).forEach(w => { if (w.length > 1) hyphenParts(w).forEach(p => surname.add(p)); });
+    // Particles typed joined or split ("Vanderberg" ~ "van der Berg", "de Oliveira Faria" ~ "deoliveirafaria"):
+    // also compare the trailing words run together.
+    surname.add(words.slice(1).join(''));
+    surname.add(words.slice(-2).join(''));
+  }
+  const given = new Set([...words.slice(0, -1).flatMap(hyphenParts),
+                         ...nick.flatMap(n => clean(n).split(/\s+/).filter(Boolean))]);
+  return { words, surname, given };
+}
+function tokenClose(a, b){
+  if (a === b) return true;
+  if (a.length === 1 || b.length === 1) return a[0] === b[0];                 // initial: "j" ~ "john"
+  if (a.length >= 3 && (b.startsWith(a) || a.startsWith(b))) return true;     // prefix: "xiao" ~ "xiaoxuan"
+  return a.length >= 4 && b.length >= 4 && levenshtein(a, b) <= 1;            // one typo, but not kim~lim
+}
+// Surnames never match on a single letter (no "initial" rule) — only given names do.
+function surnameClose(a, b){ return a.length > 1 && b.length > 1 && tokenClose(a, b); }
+function setsClose(A, B, close = tokenClose){ return [...A].some(a => [...B].some(b => close(a, b))); }
+function nameStructureMatches(typed, onFile){
+  const t = nameParts(typed), f = nameParts(onFile);
+  if (t.words.length < 2) return false;  // single words are handled by lookup()'s token layer
+  if (setsClose(t.surname, f.surname, surnameClose) && setsClose(t.given, f.given)) return true;
+  // Family-name-first entry ("Cheng Xiaoxuan"): try the first typed word as the surname instead.
+  return setsClose(new Set(hyphenParts(t.words[0])), f.surname, surnameClose)
+      && setsClose(new Set(t.words.slice(1).flatMap(hyphenParts)), f.given);
+}
+
+// A typed given name that matches EXACTLY (not fuzzily) is strong evidence on its own when it's rare:
+// "Vianney Rere" should still suggest Vianney Renata (the only Vianney on the list) even though
+// "Rere" is four edits from "Renata" and the typed affiliation is wrong. Rule: exact given-name match
+// AND (the name is shared by at most GIVEN_RARE_MAX attendees, OR the typed affiliation matches).
+// "John Rere" at Wisconsin therefore lists the Johns at Wisconsin; "John Rere" alone lists nobody
+// extra — John is common and there's no second signal.
+const GIVEN_RARE_MAX = 2;
+let GIVEN_COUNTS = null;  // given-name token -> number of attendees carrying it; built on first use
+function givenCounts(){
+  if (!GIVEN_COUNTS){
+    GIVEN_COUNTS = new Map();
+    ATTENDEES.forEach(a => nameParts(a.name).given.forEach(g => { if (g.length > 1) GIVEN_COUNTS.set(g, (GIVEN_COUNTS.get(g) || 0) + 1); }));
+  }
+  return GIVEN_COUNTS;
+}
+// Mirror image of the given-name rules, for people whose FIRST name is what changed (a nickname or
+// preferred name that isn't on file, a legal name change, autocorrect on the first name): an exact
+// SURNAME match suggests when that surname is shared by at most SURNAME_RARE_MAX attendees, or when
+// the typed affiliation matches. No nickname table anywhere — the owner's rule is that we never
+// guess what someone goes by; surname + affiliation is evidence they gave us.
+const SURNAME_RARE_MAX = 2;
+let SURNAME_COUNTS = null;  // surname token -> number of attendees whose surname set contains it
+function surnameCounts(){
+  if (!SURNAME_COUNTS){
+    SURNAME_COUNTS = new Map();
+    ATTENDEES.forEach(a => nameParts(a.name).surname.forEach(t => { if (t.length > 1) SURNAME_COUNTS.set(t, (SURNAME_COUNTS.get(t) || 0) + 1); }));
+  }
+  return SURNAME_COUNTS;
+}
+function surnameExact(typed, onFile){
+  const t = nameParts(typed), f = nameParts(onFile);
+  if (t.words.length < 2) return null;
+  return [...t.surname].find(x => x.length > 1 && f.surname.has(x)) || null;
+}
+function givenNameExact(typed, onFile){
+  const t = nameParts(typed), f = nameParts(onFile);
+  if (t.words.length < 2) return null;
+  const hit = [...t.given].find(g => g.length > 1 && f.given.has(g));
+  return hit || null;
+}
+
+function lookup(){
+  const name = document.getElementById('inName').value.trim();
+  const aff = document.getElementById('inAff').value.trim();
+  if(!name){ document.getElementById('inName').focus(); return; }
+  // Affiliation is required (2026-09-03): an exact name match with a blank affiliation used to open
+  // that person's review screen directly — with 23 Chens and 21 Kims on file, a hasty "OK, that's me"
+  // could claim (and edit) someone else's profile. With an affiliation always present, an exact match
+  // either also matches the affiliation (open the review screen) or asks "is this you?" first.
+  if(!aff){
+    document.getElementById('keyinNote').style.display = 'block';
+    document.getElementById('inAff').focus();
+    return;
+  }
+
+  const nameMatches = ATTENDEES.filter(a => a.name.toLowerCase() === name.toLowerCase());
+
+  if (nameMatches.length){
+    const affFiltered = aff ? nameMatches.filter(a => affMatches(a, aff)) : nameMatches;
+    if (affFiltered.length === 1){
+      showProfile(affFiltered[0], true);
+      return;
+    }
+    if (nameMatches.length === 1){
+      // one person has this name, but the affiliation you typed doesn't match what's on file
+      // (could be stale data, a job change, or a typo) — confirm instead of guessing
+      renderSuggestList(nameMatches, `We found "${name}" on file, but not at that affiliation. Is this you?`);
+      return;
+    }
+    renderSuggestList(affFiltered.length ? affFiltered : nameMatches,
+      `More than one attendee is named "${name}" - which one is you?`);
+    return;
+  }
+
+  // Typing just a first (or last) name is valid too — "Vianney" should suggest
+  // "Vianney Renata" even though the full-string edit distance to it is large.
+  // Match against each whitespace-separated token of the name on file, not
+  // just the name as a whole.
+  const nameLower = name.toLowerCase();
+  const tokenMatches = ATTENDEES.filter(a =>
+    a.name.toLowerCase().split(/\s+/).some(t => t === nameLower || (t.length > 2 && levenshtein(t, nameLower) <= 1)));
+
+  const typoMatches = ATTENDEES
+    .map(a => ({ a, d: levenshtein(a.name, name) }))
+    .filter(({a,d}) => d <= 3 && d/a.name.length < 0.45)
+    .sort((x,y)=> x.d - y.d)
+    .map(({a})=>a);
+
+  // Structured surname+given-name matches come first (see nameStructureMatches above), with the
+  // ones at the typed affiliation ahead of the rest — "J. Lee" alone is a dozen people, but
+  // "J. Lee" + "Wisconsin" is usually one.
+  const structured = ATTENDEES.filter(a => {
+    if (nameStructureMatches(name, a.name)) return true;
+    const g = givenNameExact(name, a.name);
+    if (g && (givenCounts().get(g) <= GIVEN_RARE_MAX || (aff && affMatches(a, aff)))) return true;
+    const sn = surnameExact(name, a.name);
+    return !!sn && (surnameCounts().get(sn) <= SURNAME_RARE_MAX || (aff && affMatches(a, aff)));
+  });
+  const affFirst = list => aff ? [...list.filter(a => affMatches(a, aff)), ...list.filter(a => !affMatches(a, aff))] : list;
+  const candidates = [...new Set([...affFirst(structured), ...tokenMatches, ...typoMatches])].slice(0, 8);
+
+  if (candidates.length){
+    renderSuggestList(candidates, structured.length
+      ? `We couldn't find "${name}" exactly, but you might be one of these:`
+      : "We couldn't find an exact match. Is it one of these?");
+  } else {
+    goCreateNewProfile();
+  }
+}
+
+function acceptSuggestion(i){
+  showProfile(pendingSuggestions[i], true);
+}
+
+// ---------- new-attendee bio drafting (web-search-backed Haiku call, server-side) ----------
+let draftingInterval = null;
+const DRAFTING_PHRASES = [
+  {text:'Dreaming…', emoji:'\u{1F4AD}'},
+  {text:'Searching…', emoji:'\u{1F50E}'},
+  {text:'Writing…', emoji:'✍️'},
+  {text:'Revising…', emoji:'\u{1F4DD}'},
+];
+function startDraftingAnimation(){
+  let i = 0;
+  const tick = () => {
+    const p = DRAFTING_PHRASES[i % DRAFTING_PHRASES.length];
+    document.getElementById('draftingText').textContent = p.text;
+    document.getElementById('draftingEmoji').textContent = p.emoji;
+    i++;
+  };
+  tick();
+  draftingInterval = setInterval(tick, 1400);
+}
+function stopDraftingAnimation(){
+  if (draftingInterval) clearInterval(draftingInterval);
+  draftingInterval = null;
+}
+
+// A brand-new signup only ever reaches here with empty fields (this fires the moment they're
+// routed to "create new profile," before the form is even shown) — but if they somehow already
+// typed something first, still offer the draft rather than silently overwriting their own words.
+function offerDraftedBio(bio){
+  const interestsEl = document.getElementById('inInterests');
+  const bioEl = document.getElementById('inBio');
+  const hasExisting = interestsEl.value.trim() || bioEl.value.trim();
+  // The drafting screen runs before the form is ever shown, so the box is virtually always empty
+  // here and the draft just lands in it. In the rare case someone already typed, keep their words —
+  // no dialog, no sheet (a prompt here was judged not worth the interruption).
+  if (!hasExisting) bioEl.value = bio;
+}
+
+// Used whenever no real draft comes back (no confident web-search match, no key configured,
+// rate-limited, network hiccup — all the same "nothing to offer" case from here). Deliberately
+// reads as an obvious placeholder rather than a finished-looking bio: the whole point of drafting
+// something is to get people to personalize it, and a bunch of attendees left with the exact same
+// text would also make their embeddings — and therefore their matches — look identical to each
+// other instead of reflecting what they actually work on.
+const FALLBACK_BIO = "**Human Factors & Ergonomics Researcher**\nNew to the directory - replace this line with a sentence or two about what you actually work on.";
+
+async function goCreateNewProfile(){
+  const name = document.getElementById('inName').value.trim();
+  const aff = document.getElementById('inAff').value.trim();
+  show('drafting');
+  startDraftingAnimation();
+  let draftedBio = null;
+  try {
+    // Client-side timeout as a backstop on top of the server's own — the loading screen must
+    // never hang forever even if something server-side misbehaves.
+    const data = await Promise.race([
+      api('/api/draft-bio', {method:'POST', body: JSON.stringify({name, aff})}),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 35000)),
+    ]);
+    draftedBio = data && data.bio ? data.bio : null;
+  } catch (_) { /* no key configured, rate-limited, no confident match, network hiccup — all
+    equally "no draft available," never block signup on it */ }
+  stopDraftingAnimation();
+  show('newattendee');
+  if (draftedBio) {
+    offerDraftedBio(draftedBio);
+  } else if (!document.getElementById('inInterests').value.trim() && !document.getElementById('inBio').value.trim()){
+    // Unlike a real draft, a generic placeholder isn't worth interrupting someone who already
+    // started typing their own bio to ask "use this instead?" — only fill it in when blank.
+    document.getElementById('inBio').value = FALLBACK_BIO;
+  }
+}
+
+function createNewProfile(){
+  const name = document.getElementById('inName').value.trim() || 'New Attendee';
+  const aff = document.getElementById('inAff').value.trim();
+  const interests = document.getElementById('inInterests').value.trim();
+  const bio = document.getElementById('inBio').value.trim();
+  const sideInterest = document.getElementById('inSideInterest').value.trim();
+  const fullBio = [interests, bio].filter(Boolean).join('. ') || 'No bio yet.';
+  const cluster = classify(fullBio);
+  const profile = { name, aff, cluster, bio: fullBio, sideInterest, ...deterministicPos(name, cluster) };
+  showProfile(profile, false);
+}
+
+function autosizeBio(){
+  const ta = document.getElementById('profBio');
+  const view = document.getElementById('profBioView');
+  // Side-interest field: the "e.g. fountain pens, ..." prompt and the "optional" hint are
+  // edit-mode affordances. While just reviewing, an empty field reads "None" and the hint is hidden.
+  const side = document.getElementById('profSideInterest');
+  side.placeholder = ta.readOnly ? 'None' : 'e.g. fountain pens, mechanical keyboards, running';
+  document.getElementById('profSideHint').style.display = ta.readOnly ? 'none' : 'inline';
+  document.getElementById('profBioHint').style.display = ta.readOnly ? 'none' : 'inline';
+  if (ta.readOnly){
+    // View mode: show the rendered (real bold) version instead of the raw textarea, so
+    // "**word**" doesn't sit there as literal asterisks while just reviewing/confirming.
+    view.innerHTML = renderBio(ta.value);
+    view.style.display = 'block';
+    ta.style.display = 'none';
+  } else {
+    // Edit mode: back to the raw textarea, since you edit the ** markup itself, not a
+    // rendered preview.
+    view.style.display = 'none';
+    ta.style.display = 'block';
+    ta.style.height = '110px';
+  }
+}
+
+let editSnapshot = null;
+
+function renderProfileActions(editing){
+  document.getElementById('profileActions').innerHTML = editing
+    ? `<button class="btn danger" style="flex:1" onclick="cancelEdit()">Cancel</button>
+       <button class="btn success" style="flex:1" onclick="saveEdit()">OK</button>`
+    : `<button class="btn secondary" style="flex:1" onclick="editProfile()">Edit</button>
+       <button class="btn" style="flex:1" onclick="confirmProfile()">OK, that's me</button>`;
+}
+
+function showProfile(person, found, claiming=true){
+  currentUser = person;
+  document.getElementById('profAvatar').textContent = initials(person.name);
+  document.getElementById('profName').value = person.name;
+  document.getElementById('profAff').value = person.aff;
+  document.getElementById('profBio').value = person.bio;
+  document.getElementById('profSideInterest').value = person.sideInterest || '';
+  document.getElementById('profIsStudent').checked = !!person.isStudent;
+  // The "I'm a student" question is only answerable while claiming a profile (first
+  // lookup/signup), not from a later "Edit profile" on an already-claimed one — otherwise
+  // people could flip Student View access back and forth at will. Changing it later means
+  // "Not you? Reset" and claiming the profile again, which is deliberate friction.
+  document.getElementById('studentQuestionRow').style.display = claiming ? 'flex' : 'none';
+  document.getElementById('profName').readOnly = true;
+  document.getElementById('profAff').readOnly = true;
+  document.getElementById('profBio').readOnly = true;
+  document.getElementById('profSideInterest').readOnly = true;
+  const banner = document.querySelector('[data-screen="profile"] .banner');
+  banner.textContent = found ? '✓ Profile found - review & confirm' : '✓ New profile created - review & confirm';
+  banner.className = 'banner ' + (found ? 'found' : 'warn');
+  renderProfileActions(false);
+  show('profile');
+  autosizeBio();
+}
+
+function editProfile(){
+  editSnapshot = {
+    name: document.getElementById('profName').value,
+    aff: document.getElementById('profAff').value,
+    bio: document.getElementById('profBio').value,
+    sideInterest: document.getElementById('profSideInterest').value,
+  };
+  document.getElementById('profName').readOnly = false;
+  document.getElementById('profAff').readOnly = false;
+  document.getElementById('profBio').readOnly = false;
+  document.getElementById('profSideInterest').readOnly = false;
+  document.getElementById('profName').focus();
+  autosizeBio();
+  renderProfileActions(true);
+}
+
+function cancelEdit(){
+  document.getElementById('profName').value = editSnapshot.name;
+  document.getElementById('profAff').value = editSnapshot.aff;
+  document.getElementById('profBio').value = editSnapshot.bio;
+  document.getElementById('profSideInterest').value = editSnapshot.sideInterest;
+  document.getElementById('profName').readOnly = true;
+  document.getElementById('profAff').readOnly = true;
+  document.getElementById('profBio').readOnly = true;
+  document.getElementById('profSideInterest').readOnly = true;
+  autosizeBio();
+  renderProfileActions(false);
+}
+
+async function saveEdit(){
+  // isStudent is deliberately left out here when the question is hidden (editing an
+  // already-claimed profile) — see showProfile()'s "claiming" note. sideInterest, unlike
+  // isStudent, is always editable, so it's included unconditionally.
+  const claiming = document.getElementById('studentQuestionRow').style.display !== 'none';
+  currentUser = {
+    ...currentUser,
+    name: document.getElementById('profName').value.trim(),
+    aff: document.getElementById('profAff').value.trim(),
+    bio: document.getElementById('profBio').value.trim(),
+    sideInterest: document.getElementById('profSideInterest').value.trim(),
+    ...(claiming ? {isStudent: document.getElementById('profIsStudent').checked} : {}),
+  };
+  document.getElementById('profAvatar').textContent = initials(currentUser.name);
+  document.getElementById('profName').readOnly = true;
+  document.getElementById('profAff').readOnly = true;
+  document.getElementById('profBio').readOnly = true;
+  document.getElementById('profSideInterest').readOnly = true;
+  autosizeBio();
+  renderProfileActions(false);
+  persistLocalProfile();
+  const textChanged = currentUser.bio !== (editSnapshot.bio || '').trim()
+    || currentUser.sideInterest !== (editSnapshot.sideInterest || '').trim();
+  if (currentUser.personId && textChanged){
+    // Already published, and the text that gets embedded changed: re-place, and wait for it.
+    // (Name/affiliation-only edits don't move the dot, so they publish quietly as before.)
+    const prev = await placementStamp();
+    if (await publishProfileEdit()) return waitForPlacement('update', prev);
+    return;
+  }
+  publishProfileEdit();
+}
+
+async function confirmProfile(){
+  // The student checkbox (unlike name/aff/bio) is answerable straight from the "OK, that's
+  // me" confirm screen without clicking Edit first — so a plain confirm still needs to reach
+  // the API when that answer changed, even though it otherwise only publishes brand-new
+  // profiles (an unchanged confirm shouldn't queue a pointless re-embed). Only true while
+  // claiming, though — see showProfile()'s "claiming" note; the row is hidden otherwise, so
+  // its checked state is stale and must not override what's on file.
+  const claiming = document.getElementById('studentQuestionRow').style.display !== 'none';
+  const isStudentNow = claiming ? document.getElementById('profIsStudent').checked : !!currentUser.isStudent;
+  const isStudentChanged = claiming && isStudentNow !== !!currentUser.isStudent;
+  currentUser = {
+    ...currentUser,
+    name: document.getElementById('profName').value.trim(),
+    aff: document.getElementById('profAff').value.trim(),
+    bio: document.getElementById('profBio').value.trim(),
+    sideInterest: document.getElementById('profSideInterest').value.trim(),
+    isStudent: isStudentNow,
+  };
+  persistLocalProfile();
+  if (!currentUser.personId || isStudentChanged){
+    const isNew = !currentUser.personId;
+    const ok = await publishProfileEdit();
+    if (ok && isNew) return waitForPlacement('create', null);  // a student-flag change alone doesn't move the dot
+  }
+  renderHome();
+  show('home');
+}
+
+function resetCache(){
+  localStorage.removeItem(CACHE_KEY);
+  currentUser = null;
+  // Reset can be initiated from the profile bubble; remove that modal before
+  // returning to the splash screen so it cannot remain over the new screen.
+  closeOverlay();
+  closeSavedOverlay();
+  document.getElementById('inName').value = '';
+  document.getElementById('inAff').value = '';
+  show('splash');
+}
+
+// ---------- heuristic "embedding similarity" stand-in ----------
+// ponytail: keyword overlap, not a real embedding — swap in vector similarity once profiles are actually embedded
+const STOPWORDS = new Set(['about','after','also','among','applies','applying','application','applications','area','areas','based','both','broader','centers','combining','considerations','context','contexts','could','design','develops','field','focuses','framework','frameworks','from','further','however','including','into','methods','more','other','points','presentation','recent','related','search','single','studies','study','such','suggests','than','that','their','these','this','through','throughline','using','which','while','with','within','work','works']);
+function keywords(text){
+  return new Set((text||'').toLowerCase().match(/[a-z]{5,}/g)?.filter(w=>!STOPWORDS.has(w)) || []);
+}
+function matchScore(a, b, field='bio'){
+  const kb = keywords(b[field]);
+  let shared = 0;
+  keywords(a[field]).forEach(w=>{ if (kb.has(w)) shared++; });
+  // The cluster heuristic is bio-specific (research-area classify()) — meaningless for the
+  // side-interest field, so it only applies to the default main-space score.
+  const clusterBonus = field === 'bio' && a.cluster === b.cluster ? 18 : 0;
+  return Math.min(98, 42 + shared*7 + clusterBonus);
+}
+
+function applyUmapViewBox(){
+  const svg = document.getElementById('umapSvg');
+  const width = 320 / umapZoom, height = 190 / umapZoom;
+  svg.setAttribute('viewBox', `${160+umapPanX-width/2} ${95+umapPanY-height/2} ${width} ${height}`);
+  const label = document.getElementById('umapZoomLabel');
+  if (label) label.textContent = `${Math.round(umapZoom*100)}%`;
+}
+function zoomUmap(direction){
+  const levels = [.75, 1, 1.5, 2, 3, 4, 6, 8, 10, 12];
+  // Find the nearest level instead of relying on floating-point equality.
+  const index = levels.reduce((best, level, i) =>
+    Math.abs(level - umapZoom) < Math.abs(levels[best] - umapZoom) ? i : best, 0);
+  umapZoom = levels[Math.max(0, Math.min(levels.length-1, index + direction))];
+  applyUmapViewBox();
+}
+function resetUmapZoom(){ umapZoom = 1; umapPanX = 0; umapPanY = 0; applyUmapViewBox(); }
+function focusPersonOnMap(person){
+  highlightedPersonKey = personKey(person);
+  // Centre a comfortable close-up around the selected attendee without changing
+  // their UMAP position or recalculating the projection.
+  umapZoom = Math.max(umapZoom, 2);
+  umapPanX = person.x - 160;
+  umapPanY = person.y - 95;
+  renderHome();
+  document.getElementById('umapSvg').scrollIntoView({behavior:'smooth', block:'center'});
+}
+function enableUmapPan(svg){
+  let drag = null;
+  const pointers = new Map();
+  let pinch = null;
+
+  function startPinch(){
+    const [first, second] = [...pointers.values()];
+    const box = svg.getBoundingClientRect();
+    const [, , viewWidth, viewHeight] = svg.getAttribute('viewBox').split(' ').map(Number);
+    const centerX = (first.x + second.x) / 2, centerY = (first.y + second.y) / 2;
+    pinch = {
+      distance: Math.hypot(second.x-first.x, second.y-first.y), zoom: umapZoom,
+      focusX: 160 + umapPanX - viewWidth/2 + (centerX-box.left) * viewWidth / box.width,
+      focusY: 95 + umapPanY - viewHeight/2 + (centerY-box.top) * viewHeight / box.height,
+    };
+  }
+
+  svg.onpointerdown = event=>{
+    if (event.button !== undefined && event.button !== 0) return;
+    umapDragMoved = false;
+    pointers.set(event.pointerId, {x:event.clientX, y:event.clientY, person:event.target.__person || null});
+    if (pointers.size === 1) {
+      drag = {x:event.clientX, y:event.clientY, moved:false, person:event.target.__person || null};
+    } else if (pointers.size === 2) {
+      drag = null;
+      umapDragMoved = true;
+      startPinch();
+    }
+    svg.setPointerCapture(event.pointerId);
+  };
+  svg.onpointermove = event=>{
+    const pointer = pointers.get(event.pointerId);
+    if (!pointer) return;
+    pointer.x = event.clientX;
+    pointer.y = event.clientY;
+    if (pinch && pointers.size >= 2){
+      const [first, second] = [...pointers.values()];
+      const distance = Math.hypot(second.x-first.x, second.y-first.y);
+      if (!pinch.distance || !distance) return;
+      umapZoom = Math.max(.75, Math.min(12, pinch.zoom * distance / pinch.distance));
+      const box = svg.getBoundingClientRect();
+      const centerX = (first.x + second.x) / 2, centerY = (first.y + second.y) / 2;
+      const width = 320 / umapZoom, height = 190 / umapZoom;
+      umapPanX = pinch.focusX - 160 + width/2 - (centerX-box.left) * width / box.width;
+      umapPanY = pinch.focusY - 95 + height/2 - (centerY-box.top) * height / box.height;
+      applyUmapViewBox();
+      return;
+    }
+    if (!drag) return;
+    const box = svg.getBoundingClientRect();
+    const [, , viewWidth, viewHeight] = svg.getAttribute('viewBox').split(' ').map(Number);
+    const dx = (event.clientX-drag.x) * viewWidth / box.width;
+    const dy = (event.clientY-drag.y) * viewHeight / box.height;
+    if (Math.abs(event.clientX-drag.x)>2 || Math.abs(event.clientY-drag.y)>2) {
+      drag.moved = true;
+      umapDragMoved = true;
+    }
+    umapPanX -= dx; umapPanY -= dy;
+    drag.x = event.clientX; drag.y = event.clientY;
+    applyUmapViewBox();
+  };
+  svg.onpointerup = svg.onpointercancel = event=>{
+    const wasPinching = Boolean(pinch);
+    pointers.delete(event.pointerId);
+    // Pointer capture means pointerup is delivered to the SVG rather than the
+    // original circle. Keep the original attendee from pointerdown instead.
+    if (!wasPinching && drag?.person && !drag.moved && personKey(drag.person)!==personKey(currentUser)) openBubble(drag.person);
+    drag = null;
+    if (pointers.size < 2) pinch = null;
+    if (pointers.size === 1){
+      const remaining = [...pointers.values()][0];
+      drag = {x:remaining.x, y:remaining.y, moved:true, person:null};
+    }
+    if (svg.hasPointerCapture(event.pointerId)) svg.releasePointerCapture(event.pointerId);
+  };
+}
+async function showMoreMatches(){
+  matchVisibleCount += 2;
+  const available = loadedMatchCandidates ? loadedMatchCandidates.length
+    : (sideViewOn ? (currentUser.sideTopMatches||[]).length : (currentUser.topMatches||[]).length);
+  if (currentUser.personId && matchVisibleCount > available){
+    try {
+      const offset = loadedMatchCandidates ? loadedMatchCandidates.length : 0;
+      const extraParam = sideViewOn ? '&space=side' : (studentViewOn ? '&studentOnly=1' : '');
+      const data = await api(`/api/matches?personId=${encodeURIComponent(currentUser.personId)}&offset=${offset}&limit=50${extraParam}`);
+      // A brand-new profile can hit "show more" before its own incremental placement has
+      // finished (still inside the quiet window) — the server has nothing for it yet and
+      // returns an empty first page. Don't let that empty page wipe out the matches already
+      // on screen (the client-side keyword-overlap fallback); just skip this refresh and
+      // try again next time "show more" is clicked.
+      if (data.matches.length || offset) {
+        loadedMatchCandidates = offset ? loadedMatchCandidates.concat(data.matches) : data.matches;
+        loadedMatchTotal = data.total;
+      }
+    } catch (_) { /* Keep the already-precomputed matches available offline. */ }
+  }
+  renderHome();
+}
+function showMoreLectures(){ lectureVisibleCount += 3; renderHome(); }
+
+// ---------- home rendering ----------
+function renderHome(){
+  document.getElementById('homeAvatarBtn').textContent = initials(currentUser.name);
+  document.getElementById('embeddingsUpdated').textContent = EMBEDDINGS_GENERATED_AT
+    ? `Profile embeddings last updated: ${new Date(EMBEDDINGS_GENERATED_AT).toLocaleString()}`
+    : 'Profile embeddings not generated yet - showing placeholder positions.';
+
+  // A profile switch (claim someone else after "Not you? Reset") can leave viewMode pointed at
+  // Students while the new "you" isn't one — the picker wouldn't even offer that option anymore,
+  // so silently fall back rather than get stuck showing a mode you can no longer pick again.
+  if (viewMode === 'student' && !currentUser.isStudent){
+    viewMode = 'everyone'; studentViewOn = false;
+    document.body.classList.remove('student-view');
+  }
+  // Single "View" trigger (Everyone / Students / Non-academic) — see openViewModePicker(). One
+  // shared control instead of separate always-visible toggle buttons crowding the topbar.
+  setViewToggleText();
+
+  // Side Interests is opt-in and usually sparse early on — below SIDE_VIEW_MIN_PEOPLE the map/
+  // matches would be technically renderable but not worth showing yet. Show a "come back later"
+  // placeholder instead, and skip the rest of this function (nothing else to compute for it).
+  const belowSideThreshold = sideViewOn && SIDE_EMBEDDED_COUNT < SIDE_VIEW_MIN_PEOPLE;
+  document.getElementById('sideViewMinCount').textContent = SIDE_VIEW_MIN_PEOPLE;
+  document.getElementById('sideViewPlaceholder').style.display = belowSideThreshold ? 'block' : 'none';
+  document.getElementById('matchesAndMap').style.display = belowSideThreshold ? 'none' : 'block';
+  // No "Top Program" in Side Interests view — it's not HFES-related, so there's nothing to recommend.
+  document.getElementById('programSection').style.display = sideViewOn ? 'none' : 'block';
+  if (belowSideThreshold) return;
+
+  // The Hobby map, unlike the academic one, periodically re-shapes itself as more people opt
+  // in (see server.py's periodic_side_refit_check()) — worth saying so here, since someone who
+  // remembers where a dot used to be shouldn't read a later shift as a bug.
+  document.getElementById('mapExplainer').textContent = sideViewOn
+    ? "A map of everyone's non-academic interests - hobbies and quirky stuff, not research. It's not geography, just how alike people's interests are. This map reshapes itself occasionally as more people add their own, so positions may shift over time."
+    : "A map of everyone's interests - people working on similar things end up closer together. It's not geography, just how alike people's research focus is.";
+  const selfNotice = document.getElementById('sideViewSelfNotice');
+  selfNotice.style.display = (sideViewOn && !Number.isFinite(currentUser.sideX)) ? 'block' : 'none';
+
+  // UMAP scatter — render every embedded attendee (or, in Student View, only students plus
+  // "you"; in Side Interests view, only whoever has added side-interest text). Half opacity
+  // lets dense areas accumulate visually without turning the map into an opaque block.
+  const svg = document.getElementById('umapSvg');
+  svg.innerHTML = '';
+  document.getElementById('mapLoading').classList.remove('active');
+  applyUmapViewBox();
+  enableUmapPan(svg);
+  const sample = [...ATTENDEES];
+  if (!sample.find(p=>personKey(p)===personKey(currentUser))) sample.push(currentUser);
+  const mapPeople = sideViewOn
+    ? sample.filter(p => Number.isFinite(p.sideX) && Number.isFinite(p.sideY))
+    : (studentViewOn ? sample.filter(p => p.isStudent || personKey(p)===personKey(currentUser)) : sample);
+  mapPeople.forEach(p=>{
+    const isMe = personKey(p) === personKey(currentUser);
+    const px = sideViewOn ? p.sideX : p.x, py = sideViewOn ? p.sideY : p.y;
+    if (!Number.isFinite(px) || !Number.isFinite(py)){
+      // A profile can reach here without a position (e.g. "you", freshly signed in, before
+      // any embedding has ever placed you). An unset x/y renders the SVG circle at (0,0) —
+      // the map's top-left corner — which reads as a stray, unexplained dot. Give "you" a
+      // deterministic placeholder position so you're still visible in the main/student map;
+      // in Side Interests view there's no fallback position to fake, so just skip "me" too
+      // (the notice above already explains why you're not on this map).
+      if (!isMe || sideViewOn) return;
+      Object.assign(p, deterministicPos(p.name, p.cluster));
+    }
+    const c = document.createElementNS('http://www.w3.org/2000/svg','circle');
+    c.setAttribute('cx', sideViewOn ? p.sideX : p.x); c.setAttribute('cy', sideViewOn ? p.sideY : p.y);
+    // Start compact at the overview; SVG zoom then enlarges nodes naturally,
+    // making individual attendees easier to select at close range.
+    c.setAttribute('r', isMe ? 7 : 1.7);
+    c.style.fill = isMe ? 'var(--ink)' : 'var(--purple)'; // theme vars, so Dark Mode recolours the map too
+    if (!isMe) c.setAttribute('fill-opacity', '.5');
+    if (personKey(p) === highlightedPersonKey){
+      c.setAttribute('r', 6);
+      c.setAttribute('fill-opacity', '1');
+      c.setAttribute('stroke', '#ff9f43');
+      c.setAttribute('stroke-width', '2.5');
+    }
+    c.__person = p;
+    if(isMe) c.classList.add('me');
+    svg.appendChild(c);
+  });
+
+  // top matches: prefer precomputed real-embedding similarity; fall back to the keyword-overlap
+  // heuristic for anyone not yet embedded (a brand-new profile made this session, or if
+  // umap_positions.json never loaded)
+  let matchCandidates;
+  if (loadedMatchCandidates){
+    matchCandidates = loadedMatchCandidates;
+  } else if (sideViewOn && currentUser.sideTopMatches && currentUser.sideTopMatches.length){
+    matchCandidates = currentUser.sideTopMatches
+      .map(m => {
+        const person = ATTENDEES.find(a => a.personId === m.person_id);
+        return person ? { ...person, score: m.score } : null;
+      })
+      .filter(Boolean);
+  } else if (!sideViewOn && currentUser.topMatches && currentUser.topMatches.length){
+    matchCandidates = currentUser.topMatches
+      .map(m => {
+        const person = ATTENDEES.find(a => a.personId === m.person_id);
+        return person ? { ...person, score: m.score } : null;
+      })
+      .filter(Boolean);
+  } else if (sideViewOn){
+    matchCandidates = ATTENDEES
+      .filter(a=>a.name!==currentUser.name && a.sideInterest)
+      .map(a=>({...a, score: matchScore(currentUser, a, 'sideInterest')}))
+      .sort((a,b)=>b.score-a.score);
+  } else {
+    matchCandidates = ATTENDEES
+      .filter(a=>a.name!==currentUser.name)
+      .map(a=>({...a, score: matchScore(currentUser, a)}))
+      .sort((a,b)=>b.score-a.score);
+  }
+  // loadedMatchCandidates is already student-/side-filtered server-side (see setViewMode/
+  // showMoreMatches, which pass studentOnly=1 or space=side) — only the offline fallback
+  // branches above still need filtering here.
+  if (studentViewOn && !loadedMatchCandidates) matchCandidates = matchCandidates.filter(p => p.isStudent);
+  // Drop co-authors from academic matches (server pages are already filtered server-side, but
+  // the baked top-5 and keyword fallbacks aren't). Hobby view keeps them on purpose — sharing
+  // a hobby with a co-author is a genuine match. Note the baked top-5 can shrink below 5 here
+  // for someone whose closest neighbors are all labmates; "Show more" fetches the full
+  // server-filtered ranking.
+  if (!sideViewOn){
+    const coa = COAUTHORS.get(currentUser.personId);
+    if (coa) matchCandidates = matchCandidates.filter(p => !coa.has(p.personId));
+  }
+  const scored = matchCandidates.slice(0, matchVisibleCount);
+
+  const tm = document.getElementById('topMatches');
+  tm.innerHTML='';
+  scored.forEach(p=>{
+    const row = document.createElement('button');
+    row.className='row';
+    row.onclick = () => { focusPersonOnMap(p); openBubble(p); };
+    row.innerHTML = `<div class="dot" style="background:var(--purple)"></div>
+      <div class="rowname">${escapeHtml(p.name)}</div>
+      <div class="score">${p.score}%</div>`;
+    tm.appendChild(row);
+  });
+  if (!scored.length){
+    // HIG "Writing": a blank area needs a next step, not silence.
+    tm.innerHTML = `<div class="empty-note">${sideViewOn
+      ? "No one's close to your side interests yet - check back as more people add theirs."
+      : "No matches to show yet. If you just created or edited your profile, it takes a few minutes to be placed on the map - check back shortly."}</div>`;
+  }
+  const matchesMore = document.getElementById('topMatchesMore');
+  matchesMore.innerHTML = matchCandidates.length > matchVisibleCount
+    ? `<button class="btn ghost small" onclick="showMoreMatches()">Show more matches</button>` : '';
+
+  const tl = document.getElementById('topLectures');
+  tl.innerHTML='';
+  const uKeywords = keywords(currentUser.bio);
+  const lectureScore = (l)=>{
+    const tk = keywords(l.title);
+    let shared=0; tk.forEach(w=>{ if(uKeywords.has(w)) shared++; });
+    return shared*10 + (hashCode(l.title) % 20);
+  };
+  // Recommending someone's own talk (or one they co-authored) back to them is noise — they
+  // already know about it. A co-author's OTHER, unrelated work still stays eligible: knowing
+  // someone doesn't mean knowing everything they're presenting.
+  const eligibleLectures = LECTURES.filter(l =>
+    !(l.authors||[]).some(au => au.toLowerCase() === currentUser.name.toLowerCase()));
+  eligibleLectures
+    .map(l=>({...l, score: lectureScore(l)}))
+    .sort((a,b)=>b.score-a.score)
+    .slice(0, lectureVisibleCount)
+    .forEach(l=>{
+      const row = document.createElement('button');
+      row.className = 'row';
+      row.style.cssText = 'width:100%; border:1px solid var(--line); font:inherit; cursor:pointer; align-items:flex-start; text-align:left;';
+      row.onclick = () => openProgramBubble(l);
+      row.innerHTML = `<div class="dot" style="background:var(--purple); margin-top:5px;"></div>
+        <div>
+          <div class="rowname">${escapeHtml(l.title)}</div>
+          <div class="rowsub" style="margin-top:2px;">${fmtProgramWhen(l)}</div>
+          <div class="rowsub" style="margin-top:2px; font-style:italic;">${escapeHtml(programAuthorsLine(l))}</div>
+        </div>`;
+      tl.appendChild(row);
+    });
+  const lecturesMore = document.getElementById('topLecturesMore');
+  lecturesMore.innerHTML = eligibleLectures.length > lectureVisibleCount
+    ? `<button class="btn ghost small" onclick="showMoreLectures()">Show more program suggestions</button>` : '';
+}
+function programAuthorsLine(l){
+  const presentingAuthors = l.presentingAuthors || [];
+  const authors = l.authors || [];
+  const mainAuthors = presentingAuthors.length ? presentingAuthors.join(', ') : (authors[0] || 'TBD');
+  const extra = authors.filter(a => !presentingAuthors.includes(a));
+  return extra.length ? `${mainAuthors} +${extra.length} more` : mainAuthors;
+}
+
+// ---------- bubble popup ----------
+function openBubble(p){
+  currentBubblePerson = p;
+  const isSelf = currentUser && p.name === currentUser.name;
+  document.getElementById('bubAvatar').textContent = initials(p.name);
+  document.getElementById('bubName').textContent = p.name + (isSelf ? ' (you)' : '');
+  document.getElementById('bubAff').textContent = p.aff;
+  document.getElementById('bubBio').innerHTML = renderBio(sideViewOn ? (p.sideInterest || 'No side interests on file.') : p.bio);
+  const presBox = document.getElementById('bubPresenting');
+  const pres = p.presentations || [];
+  presBox.innerHTML = '';
+  presBox.style.display = pres.length ? 'block' : 'none';
+  if (pres.length){
+    const head = document.createElement('div');
+    head.textContent = '📄 Contribution';
+    presBox.appendChild(head);
+    pres.forEach(c=>{
+      const block = document.createElement('div');
+      block.style.marginTop = '8px';
+      const title = document.createElement(c.programUrl ? 'a' : 'div');
+      title.style.cssText = 'font-weight:700; display:block;';
+      if (c.programUrl){ title.href = c.programUrl; title.target = '_blank'; title.rel = 'noopener noreferrer'; title.style.color = 'inherit'; }
+      title.textContent = c.title;
+      const when = document.createElement('div');
+      when.style.cssText = 'margin-top:2px; font-weight:500;';
+      when.textContent = `${fmtDate(c.date)} · ${c.startTime}–${c.endTime} · ${c.location}`;
+      const meta = document.createElement('div');
+      meta.style.cssText = 'margin-top:2px; font-size:11px; opacity:.75;';
+      meta.textContent = `${c.sessionName} · ${c.role}`;
+      block.append(title, when, meta);
+      presBox.appendChild(block);
+    });
+  }
+  document.getElementById('bubActions').innerHTML = isSelf
+    ? `<button class="btn secondary" onclick="closeOverlay(); editFromHome();">Edit profile</button>
+       <button class="btn" onclick="resetCache()">Not you? Reset</button>`
+    : `<button class="btn" id="bubSaveBtn" onclick="handleSaveClick()">${isSaved(p) ? 'Saved ✓ - tap to remove' : 'Save'}</button>`;
+  document.getElementById('bubExtra').innerHTML = isSelf
+    ? `<button class="btn ghost small" onclick="closeOverlay(); openSavedList();">Saved Contact List (${getSavedIds().length})</button>
+       <button class="btn ghost small" style="margin-top:8px;" onclick="closeOverlay(); openSavedProgramsList();">Saved Programs (${getSavedProgramIds().length})</button>`
+    : '';
+  document.getElementById('overlay').classList.add('active');
+}
+function handleSaveClick(){
+  const nowSaved = toggleSave(currentBubblePerson);
+  document.getElementById('bubSaveBtn').textContent = nowSaved ? 'Saved ✓ - tap to remove' : 'Save';
+}
+function openMe(){ openBubble(currentUser); }
+function editFromHome(){ showProfile(currentUser, true, false); editProfile(); }
+function closeOverlay(){ document.getElementById('overlay').classList.remove('active'); }
+
+function openSavedList(){
+  const ids = getSavedIds();
+  const people = ids.map(id => ATTENDEES.find(a => personKey(a) === id)).filter(Boolean);
+  const list = document.getElementById('savedList');
+  list.innerHTML = people.length ? '' : '<p class="sub" style="margin:0;">No one saved yet - tap Save on a match to add them here.</p>';
+  people.forEach(p=>{
+    const row = document.createElement('button');
+    row.className = 'row';
+    row.style.cssText = 'width:100%; border:1px solid var(--line); font:inherit; cursor:pointer;';
+    row.onclick = () => { closeSavedOverlay(); openBubble(p); };
+    row.innerHTML = `<div class="dot" style="background:var(--purple)"></div>
+      <div><div class="rowname">${escapeHtml(p.name)}</div><div class="rowsub">${escapeHtml(p.aff)}</div></div>`;
+    list.appendChild(row);
+  });
+  document.getElementById('savedOverlay').classList.add('active');
+}
+function closeSavedOverlay(){ document.getElementById('savedOverlay').classList.remove('active'); }
+function closeSavedOverlayBg(e){ if(e.target.id==='savedOverlay') closeSavedOverlay(); }
+
+// ---------- program detail popup ----------
+let currentBubbleProgram = null;
+// Session names carry a leading technical-group code where one applies, e.g.
+// "CEDM4: Trust and Transparency in AI-Assisted Decision Making" — pull it out so it can be
+// shown even when the rest of the name just repeats the presentation title.
+function splitSessionCode(sessionName){
+  const m = (sessionName || '').match(/^([A-Za-z]{2,6}\d{1,3}[a-c]?):\s*(.*)$/);
+  return m ? {code: m[1].toUpperCase(), rest: m[2]} : {code: null, rest: sessionName || ''};
+}
+function openProgramBubble(l){
+  currentBubbleProgram = l;
+  document.getElementById('progTitle').textContent = l.title;
+  document.getElementById('progWhen').textContent = fmtProgramWhen(l);
+  const {code, rest} = splitSessionCode(l.sessionName);
+  const sessionLabel = rest && rest !== l.title ? rest : (l.sessionType || '');
+  document.getElementById('progSession').textContent = [code, sessionLabel].filter(Boolean).join(' · ');
+  const presentingAuthors = l.presentingAuthors || [];
+  const authors = l.authors || [];
+  const mainAuthors = presentingAuthors.length ? presentingAuthors : authors;
+  const extra = authors.filter(a => !mainAuthors.includes(a));
+  document.getElementById('progAuthors').innerHTML =
+    `<strong>${mainAuthors.join(', ') || 'TBD'}</strong>` +
+    (extra.length ? `<div style="margin-top:4px; color:var(--gray); font-size:12px;">with ${extra.join(', ')}</div>` : '');
+  document.getElementById('progActions').innerHTML = `
+    <button class="btn" id="progSaveBtn" onclick="handleSaveProgramClick()">${isProgramSaved(l) ? 'Saved ✓ - tap to remove' : 'Save to my schedule'}</button>
+    ${l.programUrl ? `<a class="btn secondary" href="${l.programUrl}" target="_blank" rel="noopener noreferrer" style="text-decoration:none; text-align:center;">View on HFES site ↗</a>` : ''}`;
+  document.getElementById('programOverlay').classList.add('active');
+}
+function handleSaveProgramClick(){
+  const nowSaved = toggleSaveProgram(currentBubbleProgram);
+  document.getElementById('progSaveBtn').textContent = nowSaved ? 'Saved ✓ - tap to remove' : 'Save to my schedule';
+}
+function closeProgramOverlay(){
+  document.getElementById('programOverlay').classList.remove('active');
+  // The Saved Program list is deliberately left open underneath this popup (see
+  // openSavedProgramsList()) so closing returns to the list instead of jumping to Home —
+  // but that means a Save/remove done from inside the popup needs the list refreshed too,
+  // or it goes on showing a since-removed session until reopened from scratch.
+  if (document.getElementById('savedProgramsOverlay').classList.contains('active')) openSavedProgramsList();
+}
+function closeProgramOverlayBg(e){ if(e.target.id==='programOverlay') closeProgramOverlay(); }
+
+function openSavedProgramsList(){
+  const ids = getSavedProgramIds();
+  const items = ids.map(id => LECTURES.find(l => l.id === id)).filter(Boolean)
+    .map(l => ({...l, startMin: timeToMinutes(l.startTime), endMin: timeToMinutes(l.endTime)}))
+    .sort((a,b) => a.date === b.date ? a.startMin - b.startMin : (a.date < b.date ? -1 : 1));
+  // Group sessions whose times overlap onto one line — the layout itself shows the
+  // conflict, no separate warning icon needed.
+  const clusters = [];
+  items.forEach(item => {
+    const last = clusters[clusters.length - 1];
+    if (last && last.date === item.date && item.startMin < last.maxEnd){
+      last.items.push(item);
+      last.maxEnd = Math.max(last.maxEnd, item.endMin);
+    } else {
+      clusters.push({date: item.date, maxEnd: item.endMin, items: [item]});
+    }
+  });
+  const list = document.getElementById('savedProgramsList');
+  list.innerHTML = clusters.length ? '' : '<p class="sub" style="margin:0;">No sessions saved yet - tap Save on a program to add it here.</p>';
+  let lastDate = null;
+  clusters.forEach(cluster => {
+    if (cluster.date !== lastDate){
+      lastDate = cluster.date;
+      const header = document.createElement('div');
+      header.className = 'list-title';
+      header.style.marginTop = list.children.length ? '16px' : '0';
+      header.style.color = 'var(--purple)';
+      header.textContent = fmtDate(cluster.date);
+      list.appendChild(header);
+    }
+    const line = document.createElement('div');
+    // A single session gets the full-width row as before. Two+ overlapping ones don't
+    // squeeze into ever-thinner columns (unreadable past 2-3) — they scroll horizontally
+    // instead, each at a fixed, comfortably readable width.
+    const scrollable = cluster.items.length > 1;
+    line.style.cssText = scrollable
+      ? 'display:flex; gap:8px; margin-bottom:8px; overflow-x:auto; scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch; padding-bottom:2px;'
+      : 'display:flex; gap:8px; margin-bottom:8px;';
+    cluster.items.forEach(l => {
+      const card = document.createElement('button');
+      card.className = 'row';
+      card.style.cssText = (scrollable
+        ? 'flex:0 0 82%; scroll-snap-align:start;'
+        : 'flex:1; min-width:0;')
+        + ' border:1px solid var(--line); font:inherit; cursor:pointer; text-align:left; align-items:flex-start; margin-bottom:0;';
+      // Leave the saved-program list open underneath — closing the detail popup
+      // should land back here, not jump all the way to the home screen.
+      card.onclick = () => openProgramBubble(l);
+      card.innerHTML = `<div>
+        <div class="rowname">${escapeHtml(l.title)}</div>
+        <div class="rowsub" style="margin-top:2px;">${fmtProgramWhen(l)}</div>
+      </div>`;
+      line.appendChild(card);
+    });
+    list.appendChild(line);
+  });
+  document.getElementById('savedProgramsOverlay').classList.add('active');
+}
+function closeSavedProgramsOverlay(){ document.getElementById('savedProgramsOverlay').classList.remove('active'); }
+function closeSavedProgramsOverlayBg(e){ if(e.target.id==='savedProgramsOverlay') closeSavedProgramsOverlay(); }
+
+function openFeedback(){
+  document.getElementById('feedbackText').value = '';
+  document.getElementById('feedbackStatus').textContent = '';
+  document.getElementById('feedbackOverlay').classList.add('active');
+}
+function closeFeedback(){ document.getElementById('feedbackOverlay').classList.remove('active'); }
+function closeFeedbackBg(e){ if(e.target.id==='feedbackOverlay') closeFeedback(); }
+
+function openFaq(){ document.getElementById('faqOverlay').classList.add('active'); }
+function closeFaq(){ document.getElementById('faqOverlay').classList.remove('active'); }
+function closeFaqBg(e){ if(e.target.id==='faqOverlay') closeFaq(); }
+async function submitFeedback(){
+  const message = document.getElementById('feedbackText').value.trim();
+  const status = document.getElementById('feedbackStatus');
+  if (message.length < 3){ status.textContent = 'Please add a little more detail.'; return; }
+  try {
+    await api('/api/feedback', {method:'POST', body:JSON.stringify({message})});
+    status.textContent = 'Thanks - your anonymous feedback was sent.';
+    document.getElementById('feedbackText').value = '';
+  } catch (_) { status.textContent = 'Could not send feedback right now. Please try again.'; }
+}
+
+function runSearch(){
+  const q = document.getElementById('searchInput').value.trim().toLowerCase();
+  const box = document.getElementById('searchResults');
+  box.innerHTML = '';
+  if (q.length < 2) return;
+  const matches = ATTENDEES.filter(a => a.name.toLowerCase().includes(q)).slice(0, 8);
+  if (!matches.length){
+    box.innerHTML = '<p class="sub" style="margin:0 0 12px;">No attendees found.</p>';
+    return;
+  }
+  matches.forEach(p=>{
+    const row = document.createElement('button');
+    row.className = 'row';
+    row.style.cssText = 'width:100%; border:1px solid var(--line); font:inherit; cursor:pointer;';
+    row.onclick = () => { focusPersonOnMap(p); openBubble(p); };
+    row.innerHTML = `<div class="dot" style="background:var(--purple)"></div>
+      <div><div class="rowname">${escapeHtml(p.name)}</div><div class="rowsub">${escapeHtml(p.aff)}</div></div>`;
+    box.appendChild(row);
+  });
+}
+function closeOverlayBg(e){ if(e.target.id==='overlay') closeOverlay(); }
+// Popups behave as dialogs for keyboard and VoiceOver: focus moves to ✕ on open and back to the
+// opener on close, Esc closes the topmost one, and screens behind are inert so Tab can't wander under.
+// ponytail: one class-change observer instead of editing each of the 7 open/close functions.
+// Rows re-render on click (focusPersonOnMap) before the popup opens, so remember the element's
+// slot (parent id + index) as well — the row is gone by then, its replacement sits in the same place.
+let lastFocusOutside = null;
+document.addEventListener('focusin', e => {
+  const el = e.target;
+  if (el.closest('.overlay')) return;
+  lastFocusOutside = { el, parentId: el.parentElement?.id, idx: el.parentElement ? [...el.parentElement.children].indexOf(el) : -1 };
+});
+document.querySelectorAll('.overlay').forEach(o => {
+  o.setAttribute('role', 'dialog'); o.setAttribute('aria-modal', 'true');
+  new MutationObserver(() => {
+    const open = o.classList.contains('active');
+    if (open === !!o._open) return;
+    o._open = open;
+    const anyOpen = !!document.querySelector('.overlay.active'); // before focusing: inert elements can't take focus
+    document.querySelectorAll('.screen').forEach(s => { s.inert = anyOpen; });
+    if (open){
+      o._opener = lastFocusOutside;
+      o.setAttribute('aria-label', o.querySelector('h2, #bubName')?.textContent.trim() || 'Dialog');
+      o.querySelector('.closebubble')?.focus({preventScroll:true});
+    } else {
+      const f = o._opener;
+      const back = f?.el.isConnected ? f.el : f?.parentId && document.getElementById(f.parentId)?.children[f.idx];
+      back?.focus({preventScroll:true});
+    }
+  }).observe(o, {attributes:true, attributeFilter:['class']});
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  const top = [...document.querySelectorAll('.overlay.active')].pop(); // later in the DOM = on top
+  if (top) top.onclick({target: top}); // each overlay's own backdrop-close handler
+});
+restoreLocalProfileOnLoad();
+</script>
+</body>
+</html>

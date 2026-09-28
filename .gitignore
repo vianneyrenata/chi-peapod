@@ -1,0 +1,15 @@
+__pycache__/
+state/
+.venv/
+*.pdf
+ec2-backup-*/
+# Generated from the CHI programme feed by chi_feed.py (CC BY-NC-SA 4.0 data) or by embed_umap.py —
+# never committed: the feed is the source, the server's copies are the live state.
+authors.csv
+program.csv
+embed_text.json
+feed_revision.json
+*umap_positions.json
+*embeddings.npy
+*embeddings_person_ids.json
+*umap_reducer.joblib

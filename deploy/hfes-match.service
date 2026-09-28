@@ -1,0 +1,21 @@
+[Unit]
+Description=HFE Peapod API
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=hfesmatch
+Group=hfesmatch
+WorkingDirectory=/opt/hfes-match
+EnvironmentFile=/etc/hfes-match.env
+ExecStart=/opt/hfes-match/.venv/bin/gunicorn -c /opt/hfes-match/deploy/gunicorn.conf.py server:app
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ReadWritePaths=/opt/hfes-match/state
+
+[Install]
+WantedBy=multi-user.target
