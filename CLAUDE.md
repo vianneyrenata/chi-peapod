@@ -44,7 +44,7 @@ Data licence: **CC BY-NC-SA 4.0**. The attribution line under the app card is re
 python3 chi_feed.py [--edition chi2026] [--force]   # one sync (no DB needed; edits re-applied if it's up)
 HFES_DATABASE_URL=dbname=chipeapod python3 embed_umap.py full
 HFES_DATABASE_URL=dbname=chipeapod python3 server.py --port 8000
-python3 -m http.server 8765                          # static frontend
+python3 devproxy.py                                  # page + /api on :8765 (local stand-in for nginx)
 HFES_FEED_CHECK_SECONDS=0 python3 test_server.py     # selftest
 ```
 
@@ -53,7 +53,7 @@ If you touch `index.html`'s inline script, `node --check` the extracted script.
 ## Measured at CHI scale (chi2026 feed, 2026-09-28, laptop)
 
 9,754 people / 3,392 programme rows; 16,796 schedule entries, all parsed by the frontend's `SCHEDULE_RE`.
-`full`: 54 s, **peak RSS 2.1 GB**. The HFES t3.small (2 GB, plus the ~790 MB warm worker) won't fit;
+`full`: 54 s → 38 s since it embeds each distinct text once (4,249 of 9,725; co-authors share one), **peak RSS still 2.1 GB**. The HFES t3.small (2 GB, plus the ~790 MB warm worker) won't fit;
 plan for ≥4 GB. `umap_positions.json` is **23.8 MB (3.3 MB gzipped)**, mostly 20 named top-matches per
 person, and every browser downloads it; trimming that is open. Headless Chrome loads Home with 9.7k dots
 in ~2 s locally, with no JS errors. Poller e2e: 3 "new" people placed, 50 sampled existing dots

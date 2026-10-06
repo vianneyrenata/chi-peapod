@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CHI Peapod - Prototype</title>
+<script>if (localStorage.getItem('peapod_theme') === 'dark') document.documentElement.classList.add('dark');</script>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🫛</text></svg>">
 <link rel="apple-touch-icon" href="img-asset/peapod-icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -11,15 +12,16 @@
 <link href="https://fonts.googleapis.com/css2?family=Nunito:ital,wght@0,400..900;1,400..900&display=swap" rel="stylesheet">
 <style>
   :root{
-    /* Academic (default) = GREEN, Student = purple, Hobby = orange — swapped 2026-08-25 (was purple/green).
-       --purple is the historical name for "the accent colour"; it is NOT purple in the default theme. */
-    --purple:#1a9d6c;
-    --purple-dark:#137a54;
-    --accent-light:#7fd9b3;  /* light end of the avatar/logo gradients */
+    /* Academic (default) = BLUE (CHI's colour; was green at HFES), Student = purple, Hobby = orange.
+       --purple is the historical name for "the accent colour"; it is NOT purple in the default theme.
+       Green is kept only for success states (.banner.found, .presenting, .btn.success). */
+    --purple:#1f6fd1;
+    --purple-dark:#1858b0;
+    --accent-light:#8ab8f0;  /* light end of the avatar/logo gradients */
     --ink:#1c1c28;
     --gray:#6b6b7e;        /* 5.2:1 on white (was #8a8a99 at 3.4:1 — below WCAG AA 4.5) */
-    --accent-text:#137a54; /* accent used as TEXT and as the filled-button background (white on it passes AA) */
-    --tint:#eaf7f0;        /* pressed/hover tint for rows and icon buttons */
+    --accent-text:#1858b0; /* accent used as TEXT and as the filled-button background (white on it 6.9:1) */
+    --tint:#eaf1fc;        /* pressed/hover tint for rows and icon buttons */
     --line:#e4e4ec;
     --bg:#eef0f6;
     --card:#ffffff;
@@ -102,7 +104,7 @@
   h2{ font-size:20px; margin:0 0 4px; }
   p.sub{ color:var(--gray); font-size:14px; margin:0 0 24px; }
 
-  .spacer{ flex:1; }
+  .spacer{ flex:1; min-height:16px; }
 
   .btn{
     background:var(--accent-text); color:var(--on-accent); border:none; /* darker accent: white text >= 4.9:1 in all themes */
@@ -287,21 +289,22 @@
   .profile-field input:not([readonly]), .profile-field textarea:not([readonly]){
     border-color:var(--purple); background:#fbfbfe;
   }
-  /* Dark Mode (HIG dark-mode.md): follows the system setting, no in-app toggle. Green-tinted charcoal,
+  /* Dark Mode (HIG dark-mode.md): light by default, the button in your own profile popup toggles html.dark
+     (saved in localStorage). ponytail: CSS nesting (Safari 17.2+/Chrome 120+); older browsers just stay light. Blue-tinted charcoal,
      popups one step lighter than the page (base/elevated); accents LIGHTENED so accent text is 6-9:1,
      which means filled buttons take a dark label (--on-accent) instead of white.
      Light mode still uses a few literal colours (#fff, #fbfbfe, #f4f4fa) — each one is overridden below;
      a new literal light colour needs a line here too. */
-  @media (prefers-color-scheme: dark){
-  :root{
-    --purple:#34b27f; --purple-dark:#2a9168; --accent-light:#7fd9b3;
-    --ink:#e7ece8; --gray:#9ba79f; --accent-text:#4fd19b; --on-accent:#101512;
-    --tint:#1a2e23; --line:#2e3832; --field-line:#6b7a70; --bio:#c9d1cb; --bg:#101512; --card:#181e1a; --surface:#1f2621; --raised:#232b26;
+  html.dark{
+  &{
+    --purple:#4b8fe8; --purple-dark:#3a76c9; --accent-light:#9cc3f5;
+    --ink:#e6eaf0; --gray:#9aa3b0; --accent-text:#6aa8f5; --on-accent:#0f1218;
+    --tint:#1a2638; --line:#2e333d; --field-line:#6b7480; --bio:#c9ced6; --bg:#101318; --card:#171b22; --surface:#1e232b; --raised:#232831;
     color-scheme:dark;
   }
   body.student-view{ --purple:#8f7bff; --purple-dark:#7560f0; --accent-light:#b9abff; --accent-text:#a996ff; --tint:#241f3a; }
   body.side-view{ --purple:#ee8a45; --purple-dark:#d4712d; --accent-light:#f5b27a; --accent-text:#f2a15f; --tint:#35251a; }
-  body{ background: radial-gradient(circle, #1f2722 1px, transparent 1px) 0 0/22px 22px, var(--bg); }
+  body{ background: radial-gradient(circle, #1f242c 1px, transparent 1px) 0 0/22px 22px, var(--bg); }
   .app{ box-shadow:0 20px 50px -20px rgba(0,0,0,.6); }
   .btn{ color:var(--on-accent); }
   .btn.secondary, .backbtn{ background:var(--raised); color:var(--ink); }
@@ -311,12 +314,12 @@
   .aff-suggestions, .aff-option, .faq-btn, .map-control{ background:var(--raised); }
   .aff-option{ border-bottom-color:var(--line); }
   .bubble, .sticky-header{ background:var(--raised); }   /* elevated, per HIG base/elevated */
-  .bubble .row{ background:#29322c; }
-  .closebubble:active, .backbtn:active{ background:#2e3832; }
+  .bubble .row{ background:#292f38; }
+  .closebubble:active, .backbtn:active{ background:#2e333d; }
   .banner.found, .presenting{ background:#15301f; color:#7ee2b0; }
   .banner.warn{ background:#332812; color:#f0c25a; }
   .feedback-link{ color:var(--gray); }
-  svg circle:hover{ stroke:#e7ece8; }
+  svg circle:hover{ stroke:#e6eaf0; }
   .overlay{ background:rgba(0,0,0,.6); }
 }
 </style>
@@ -366,7 +369,7 @@
       <h1>Welcome!</h1>
       <p class="sub">You're new here - tell us a bit about your work so we can match you.</p>
       <label>Interests / research areas</label>
-      <textarea id="inInterests" placeholder="e.g. cognitive ergonomics, aviation human factors..."></textarea>
+      <textarea id="inInterests" placeholder="e.g. accessibility, tangible interfaces, social computing..."></textarea>
       <label>Short bio <span style="font-weight:400;">- tip: wrap text in **double asterisks** to bold it</span></label>
       <textarea id="inBio" placeholder="One or two sentences about you"></textarea>
       <label>Non-academic interests <span style="font-weight:400;">- optional, for the Side Interests view</span></label>
@@ -539,8 +542,8 @@
               people worth meeting in person, not replace that conversation. Think of it as a little
               scavenger hunt: their affiliation and contribution can tell you where to look, and if they're
               presenting, their session is a natural place to catch them. You can also ask around: if you
-              know their affiliation or the technical group/committee they're part of (e.g., CEDM, HART, and
-              the like), someone there likely knows them and can introduce you. Half the fun of a conference
+              know their affiliation, lab, or co-authors, someone there likely knows them and can introduce
+              you. Half the fun of a conference
               is asking around and making a new friend that way :)</div>
           </div>
           <div class="faq-item">
@@ -566,6 +569,15 @@
             <div class="faq-q">Who do I contact with concerns?</div>
             <div class="faq-a">Vianney Renata (<a href="mailto:vrenata@wisc.edu">vrenata@wisc.edu</a>), or
               <br>John D. Lee (<a href="mailto:jdlee@engr.wisc.edu">jdlee@engr.wisc.edu</a>).</div>
+          </div>
+          <div class="faq-item">
+            <div class="faq-q">Where does the conference data come from?</div>
+            <div class="faq-a">Names, affiliations, paper titles, abstracts and the schedule come from the official
+              CHI programme data (&copy; ACM CHI), licensed under
+              <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank" rel="noopener">CC BY-NC-SA 4.0</a>.
+              The starting bio for each person is built from their CHI titles, and the map and matches are computed
+              from the titles and abstracts. Everything derived from that data (the bios, map positions and matches)
+              is shared under the same licence, non-commercially. Paper links go to each paper's DOI.</div>
           </div>
           <div class="faq-item">
             <div class="faq-q">Can I reuse the peapod illustration?</div>
@@ -667,6 +679,7 @@ const CLUSTER_CENTERS = { hri:{x:130,y:50}, aviation:{x:245,y:105}, auto:{x:75,y
 let ATTENDEES = [];
 let COAUTHORS = new Map();  // personId -> Set of co-author personIds; built in loadRealData()
 let LECTURES = [];
+const NOT_SUGGESTED_TYPES = new Set(['SIGCHI Awards', 'Student Mentoring Program']);  // exact feed Session Type values
 let AFFILIATIONS = [];
 let EMBEDDINGS_GENERATED_AT = null;
 
@@ -935,6 +948,7 @@ function fmtDate(dateStr){
   return new Date(dateStr+'T12:00:00').toLocaleDateString('en-US', {weekday:'long', month:'short', day:'numeric'});
 }
 // program.csv already gives Day/Date/Start Time/End Time as separate columns — just format, no parsing needed
+function sessionsOf(l){ return LECTURES.filter(x => x.id === l.id); }
 function fmtProgramWhen(l){
   const monthDay = new Date(l.date+'T12:00:00').toLocaleDateString('en-US', {month:'short', day:'numeric'});
   return `${l.day}, ${monthDay} · ${l.startTime}–${l.endTime}${l.location ? ' · '+l.location : ''}`;
@@ -947,7 +961,8 @@ function deterministicPos(name, cluster){
   return { x: Math.min(310, Math.max(10, c.x + jx*0.5)), y: Math.min(180, Math.max(10, c.y + jy*0.5)) };
 }
 
-async function loadRealData(){
+let DATA_LOADED_AT = 0;
+async function loadRealData(background = false){
   try {
     // cache:'no-cache' forces a revalidation with the server on every page load instead of
     // silently reusing this browser's own local cache — so a refresh always at least checks
@@ -974,8 +989,11 @@ async function loadRealData(){
       const xMin = Math.min(...xs), xMax = Math.max(...xs), yMin = Math.min(...ys), yMax = Math.max(...ys);
       const scaleX = x => 15 + (x - xMin) / ((xMax - xMin) || 1) * 290;
       const scaleY = y => 15 + (y - yMin) / ((yMax - yMin) || 1) * 160;
+      // Co-authors of one paper share a text and so an exact position; a fixed per-person nudge
+      // (≤1.5 units of a 320-wide map) keeps them from drawing as a single dot.
+      const nudge = (id, salt) => ((Math.abs(hashCode(id + salt)) % 31) - 15) / 10;
       embeddingsData.people.forEach(p=>{
-        embByPerson.set(p.person_id, { x: scaleX(p.x), y: scaleY(p.y), topMatches: p.top_matches || [] });
+        embByPerson.set(p.person_id, { x: scaleX(p.x) + nudge(p.person_id, 'x'), y: scaleY(p.y) + nudge(p.person_id, 'y'), topMatches: p.top_matches || [] });
       });
     }
     const sideEmbByPerson = new Map();
@@ -1020,7 +1038,7 @@ async function loadRealData(){
     }));
 
     const authors = parseCSV(authorsText).filter(a=>a.Author);
-    // Co-author index (mirrors the one server.py's Catalogue.reload() builds — keep in sync):
+    // Co-author index (mirrors embed_umap.coauthor_index(), used by server.py and the baked matches — keep in sync):
     // people sharing a presentation (title+date, any authorship role; Session Chair doesn't
     // count) are co-authors, and get dropped from each other's ACADEMIC top matches — their
     // bios describe the same papers, so embeddings rank them at the top, but "go meet your own
@@ -1042,6 +1060,12 @@ async function loadRealData(){
       parsedPres.forEach(pres => {
         if (pres.role === 'Session Chair') return;
         const k = `${pres.title.toLowerCase()}|${pres.date}`;
+        if (!presGroups.has(k)) presGroups.set(k, []);
+        presGroups.get(k).push(a['Person ID']);
+      });
+      // Same fallback as embed_umap.coauthor_index(): papers in no scheduled session group by title alone.
+      if (!parsedPres.length) (a['Presentation Titles']||'').split('; ').filter(t=>t.trim()).forEach(t => {
+        const k = `${t.trim().toLowerCase()}|unscheduled`;
         if (!presGroups.has(k)) presGroups.set(k, []);
         presGroups.get(k).push(a['Person ID']);
       });
@@ -1089,6 +1113,7 @@ async function loadRealData(){
         .filter(Boolean)
     )].sort();
     renderAffOptions();
+    DATA_LOADED_AT = Date.now();
     // A returning localStorage user can reach Home before the CSV/embedding
     // requests finish. Hydrate them and redraw once the real projection arrives.
     if (currentUser && document.querySelector('[data-screen="home"]').classList.contains('active')){
@@ -1100,12 +1125,18 @@ async function loadRealData(){
     // No fictional fallback data — ATTENDEES/LECTURES just stay empty. This is a real, total
     // failure to load the app (not the normal "no data yet" state), so say so plainly instead
     // of leaving people staring at a silently empty home screen, and let the authors know.
-    console.warn('Could not load HFES CSV data.', err);
+    console.warn('Could not load CHI programme data.', err);
+    if (background) return;  // a failed refresh keeps the data already on screen
     show('loaderror');
     api('/api/client-error', {method: 'POST', body: JSON.stringify({message: String(err && err.message || err)})}).catch(()=>{});
   }
 }
 loadRealData();
+// Rooms and times change during the conference and phones keep the tab open for days, so refetch
+// when the app comes back to the foreground with data older than 10 minutes.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && DATA_LOADED_AT && Date.now() - DATA_LOADED_AT > 10*60*1000) loadRealData(true);
+});
 
 // ---------- navigation ----------
 function show(name){
@@ -1811,7 +1842,7 @@ function renderHome(){
   document.getElementById('sideViewMinCount').textContent = SIDE_VIEW_MIN_PEOPLE;
   document.getElementById('sideViewPlaceholder').style.display = belowSideThreshold ? 'block' : 'none';
   document.getElementById('matchesAndMap').style.display = belowSideThreshold ? 'none' : 'block';
-  // No "Top Program" in Side Interests view — it's not HFES-related, so there's nothing to recommend.
+  // No "Top Program" in Side Interests view — it's not CHI-related, so there's nothing to recommend.
   document.getElementById('programSection').style.display = sideViewOn ? 'none' : 'block';
   if (belowSideThreshold) return;
 
@@ -1946,8 +1977,13 @@ function renderHome(){
   // Recommending someone's own talk (or one they co-authored) back to them is noise — they
   // already know about it. A co-author's OTHER, unrelated work still stays eligible: knowing
   // someone doesn't mean knowing everything they're presenting.
-  const eligibleLectures = LECTURES.filter(l =>
-    !(l.authors||[]).some(au => au.toLowerCase() === currentUser.name.toLowerCase()));
+  // Awards and mentoring aren't topical, so never suggest them; they stay in the data, so they
+  // still open from a person's profile. Meet-Ups/Workshops stay: often topic-based, good for meeting people.
+  // One suggestion per item: posters and some papers run in 2+ sessions (802 in chi2026); the card lists every time.
+  const seenIds = new Set();
+  const eligibleLectures = LECTURES.filter(l => !NOT_SUGGESTED_TYPES.has(l.sessionType) &&
+    !(l.authors||[]).some(au => au.toLowerCase() === currentUser.name.toLowerCase()) &&
+    !seenIds.has(l.id) && seenIds.add(l.id));
   eligibleLectures
     .map(l=>({...l, score: lectureScore(l)}))
     .sort((a,b)=>b.score-a.score)
@@ -1960,7 +1996,7 @@ function renderHome(){
       row.innerHTML = `<div class="dot" style="background:var(--purple); margin-top:5px;"></div>
         <div>
           <div class="rowname">${escapeHtml(l.title)}</div>
-          <div class="rowsub" style="margin-top:2px;">${fmtProgramWhen(l)}</div>
+          <div class="rowsub" style="margin-top:2px;">${fmtProgramWhen(l)}${sessionsOf(l).length > 1 ? ` (+${sessionsOf(l).length - 1} more time)` : ''}</div>
           <div class="rowsub" style="margin-top:2px; font-style:italic;">${escapeHtml(programAuthorsLine(l))}</div>
         </div>`;
       tl.appendChild(row);
@@ -2016,7 +2052,8 @@ function openBubble(p){
     : `<button class="btn" id="bubSaveBtn" onclick="handleSaveClick()">${isSaved(p) ? 'Saved ✓ - tap to remove' : 'Save'}</button>`;
   document.getElementById('bubExtra').innerHTML = isSelf
     ? `<button class="btn ghost small" onclick="closeOverlay(); openSavedList();">Saved Contact List (${getSavedIds().length})</button>
-       <button class="btn ghost small" style="margin-top:8px;" onclick="closeOverlay(); openSavedProgramsList();">Saved Programs (${getSavedProgramIds().length})</button>`
+       <button class="btn ghost small" style="margin-top:8px;" onclick="closeOverlay(); openSavedProgramsList();">Saved Programs (${getSavedProgramIds().filter(id => LECTURES.some(l => l.id === id)).length})</button>
+       <button class="btn ghost small" style="margin-top:8px;" id="themeToggle" onclick="toggleTheme()">${themeLabel()}</button>`
     : '';
   document.getElementById('overlay').classList.add('active');
 }
@@ -2059,7 +2096,7 @@ function splitSessionCode(sessionName){
 function openProgramBubble(l){
   currentBubbleProgram = l;
   document.getElementById('progTitle').textContent = l.title;
-  document.getElementById('progWhen').textContent = fmtProgramWhen(l);
+  document.getElementById('progWhen').innerHTML = sessionsOf(l).map(s => escapeHtml(fmtProgramWhen(s))).join('<br>');
   const {code, rest} = splitSessionCode(l.sessionName);
   const sessionLabel = rest && rest !== l.title ? rest : (l.sessionType || '');
   document.getElementById('progSession').textContent = [code, sessionLabel].filter(Boolean).join(' · ');
@@ -2072,7 +2109,7 @@ function openProgramBubble(l){
     (extra.length ? `<div style="margin-top:4px; color:var(--gray); font-size:12px;">with ${extra.join(', ')}</div>` : '');
   document.getElementById('progActions').innerHTML = `
     <button class="btn" id="progSaveBtn" onclick="handleSaveProgramClick()">${isProgramSaved(l) ? 'Saved ✓ - tap to remove' : 'Save to my schedule'}</button>
-    ${l.programUrl ? `<a class="btn secondary" href="${l.programUrl}" target="_blank" rel="noopener noreferrer" style="text-decoration:none; text-align:center;">View on HFES site ↗</a>` : ''}`;
+    ${l.programUrl ? `<a class="btn secondary" href="${l.programUrl}" target="_blank" rel="noopener noreferrer" style="text-decoration:none; text-align:center;">${l.programUrl.includes('doi.org') ? 'View paper (DOI)' : 'View in CHI programme'} ↗</a>` : ''}`;
   document.getElementById('programOverlay').classList.add('active');
 }
 function handleSaveProgramClick(){
@@ -2158,6 +2195,12 @@ function openFeedback(){
 function closeFeedback(){ document.getElementById('feedbackOverlay').classList.remove('active'); }
 function closeFeedbackBg(e){ if(e.target.id==='feedbackOverlay') closeFeedback(); }
 
+function themeLabel(){ return document.documentElement.classList.contains('dark') ? '☀ Switch to light mode' : '☾ Switch to dark mode'; }
+function toggleTheme(){
+  const dark = document.documentElement.classList.toggle('dark');
+  localStorage.setItem('peapod_theme', dark ? 'dark' : 'light');
+  document.getElementById('themeToggle').textContent = themeLabel();
+}
 function openFaq(){ document.getElementById('faqOverlay').classList.add('active'); }
 function closeFaq(){ document.getElementById('faqOverlay').classList.remove('active'); }
 function closeFaqBg(e){ if(e.target.id==='faqOverlay') closeFaq(); }

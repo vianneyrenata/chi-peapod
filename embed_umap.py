@@ -48,6 +48,7 @@ import csv
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 from collections import namedtuple
@@ -224,13 +225,51 @@ def read_profiles(space: Space = MAIN_SPACE):
     ]
 
 
-def top_matches_for(i, embeddings, profiles):
+def coauthor_index(rows) -> dict[str, set[str]]:
+    """Two people co-authored if any presentation (title + date, from their Schedule Detail
+    entries) appears in both their schedules with an authorship role. Session Chair doesn't
+    count, since chairing isn't co-authoring. Drops co-authors from ACADEMIC top matches only:
+    they share paper text, so they'd fill the top of everyone's list, and "go meet your own
+    labmate" is noise. Hobby matches keep them. Shared by server.py (live /api/matches) and the
+    baked top_matches below; index.html builds the same index client-side, keep them in sync."""
+    title_people: dict[str, set[str]] = {}
+    for r in rows:
+        if not (r.get("Author") and r.get("Person ID")):
+            continue
+        for part in (r.get("Schedule Detail") or "").split("|"):
+            part = part.strip()
+            role = re.search(r"\[([^\]]+)\]$", part)
+            if not part or (role and role.group(1) == "Session Chair"):
+                continue
+            title = (part[:role.start()] if role else part).rsplit("·", 1)[-1].strip().lower()
+            key = f"{title}|{part.split(' ', 1)[0]}"  # date prefix disambiguates generic titles
+            title_people.setdefault(key, set()).add(r["Person ID"])
+        # Papers in no scheduled session (773 people in chi2026) leave Schedule Detail empty;
+        # group those by title alone. ponytail: two unscheduled papers with the same title would merge.
+        if not (r.get("Schedule Detail") or "").strip():
+            for title in (r.get("Presentation Titles") or "").split("; "):
+                if title.strip():
+                    title_people.setdefault(f"{title.strip().lower()}|unscheduled", set()).add(r["Person ID"])
+    coauthors: dict[str, set[str]] = {}
+    for ids in title_people.values():
+        if len(ids) > 1:
+            for pid in ids:
+                coauthors.setdefault(pid, set()).update(ids - {pid})
+    return coauthors
+
+
+def read_coauthors() -> dict[str, set[str]]:
+    with open(CSV_PATH, encoding="utf-8-sig") as f:
+        return coauthor_index(csv.DictReader(f))
+
+
+def top_matches_for(i, embeddings, profiles, exclude=frozenset()):
     # embeddings are L2-normalized, so a dot product IS the cosine similarity
     sims = embeddings @ embeddings[i]
     order = np.argsort(-sims)
     matches = []
     for j in order:
-        if j == i:
+        if j == i or profiles[j]["person_id"] in exclude:
             continue
         matches.append({"person_id": profiles[j]["person_id"], "name": profiles[j]["name"], "score": round(float(sims[j]) * 100)})
         if len(matches) == TOP_K:
@@ -295,10 +334,20 @@ def run_full(spaces=(MAIN_SPACE, SIDE_SPACE), model=None):
         if model is None:
             model = load_model()
         try:
-            embeddings = model.encode([p["text"] for p in profiles], show_progress_bar=True, normalize_embeddings=True)
+            # Co-authors of a single paper share exactly the same text (~56% of CHI people), so
+            # embed and fit each distinct text once and hand everyone sharing it the same row and
+            # dot. Same result, ~2.3x less encode/UMAP work, and UMAP isn't fed thousands of
+            # exact duplicates. index.html nudges stacked dots apart when drawing.
+            texts = [p["text"] for p in profiles]
+            uniq = list(dict.fromkeys(texts))
+            row_of = {t: k for k, t in enumerate(uniq)}
+            idx = np.array([row_of[t] for t in texts])
+            print(f"{len(uniq)} distinct texts among {len(texts)} profiles.", file=sys.stderr)
+            uniq_embeddings = model.encode(uniq, show_progress_bar=True, normalize_embeddings=True)
+            embeddings = uniq_embeddings[idx]
 
             reducer = umap.UMAP(n_components=2, random_state=42)
-            coords = reducer.fit_transform(embeddings)
+            coords = reducer.fit_transform(uniq_embeddings)[idx]
 
             embeddings_tmp = space.embeddings_path.with_name(space.embeddings_path.stem + ".tmp.npy")
             with open(embeddings_tmp, "wb") as f:
@@ -311,9 +360,11 @@ def run_full(spaces=(MAIN_SPACE, SIDE_SPACE), model=None):
 
             print(f"Computing top matches for everyone in the {space.name} space...", file=sys.stderr)
             now = datetime.now(timezone.utc).isoformat()
+            coauthors = read_coauthors() if space is MAIN_SPACE else {}
             people = [
                 {"person_id": p["person_id"], "name": p["name"], "x": float(x), "y": float(y),
-                 "top_matches": top_matches_for(i, embeddings, profiles), "updated_at": now}
+                 "top_matches": top_matches_for(i, embeddings, profiles, coauthors.get(p["person_id"], frozenset())),
+                 "updated_at": now}
                 for i, (p, (x, y)) in enumerate(zip(profiles, coords))
             ]
             write_positions(space, people, now)
@@ -327,9 +378,9 @@ def run_full(spaces=(MAIN_SPACE, SIDE_SPACE), model=None):
             print(f"Skipping the {space.name} space this run — fit failed, will retry next full run: {exc}", file=sys.stderr)
 
 
-def rank_candidates(all_embeddings, all_ids, person_id, embedding, top_k):
-    """Nearest neighbors for `embedding`, excluding person_id's own (possibly stale) row."""
-    candidate_idx = [i for i, pid in enumerate(all_ids) if pid != person_id]
+def rank_candidates(all_embeddings, all_ids, person_id, embedding, top_k, exclude=frozenset()):
+    """Nearest neighbors for `embedding`, excluding person_id's own (possibly stale) row and `exclude`."""
+    candidate_idx = [i for i, pid in enumerate(all_ids) if pid != person_id and pid not in exclude]
     sims = all_embeddings[candidate_idx] @ embedding
     order = np.argsort(-sims)[:top_k]
     return [(all_ids[candidate_idx[j]], float(sims[j])) for j in order]
@@ -377,11 +428,13 @@ def _place_batch_in_space(space: Space, items, model):
         name_by_id = {pid: p["name"] for pid, p in people_by_id.items()}
 
         now = datetime.now(timezone.utc).isoformat()
+        coauthors = read_coauthors() if space is MAIN_SPACE else {}
         for profile, embedding, (x, y) in zip(items, embeddings, coords):
             person_id = profile["person_id"]
             # Batch-mates already placed earlier in this same loop are visible here too (they're
             # already folded into all_embeddings/all_ids), so people signing up together can match.
-            ranked = rank_candidates(all_embeddings, all_ids, person_id, embedding, TOP_K)
+            ranked = rank_candidates(all_embeddings, all_ids, person_id, embedding, TOP_K,
+                                     coauthors.get(person_id, frozenset()))
             top_matches = [{"person_id": pid, "name": name_by_id.get(pid, "?"), "score": round(score * 100)} for pid, score in ranked]
             all_embeddings, all_ids = upsert_embedding(all_embeddings, all_ids, person_id, embedding)
             name_by_id[person_id] = profile["name"]

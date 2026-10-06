@@ -363,30 +363,8 @@ class Catalogue:
             "sideInterest": r.get("Side Interest") or ""}
             for r in rows if r.get("Author") and r.get("Person ID")}
 
-        # Co-author index: two people co-authored if any presentation (title + date, from their
-        # Schedule Detail entries) appears in both their schedules with an authorship role —
-        # Session Chair doesn't count, chairing isn't co-authoring. Used to drop co-authors from
-        # ACADEMIC top matches only (they share paper text, so embeddings rank them near the top,
-        # but "go meet your own labmate" is noise). Hobby-space matches are never filtered — a
-        # shared hobby with a co-author is a genuine match. index.html builds the same index
-        # client-side for its offline fallback paths; keep the two derivations in sync.
-        title_people: dict[str, set[str]] = {}
-        for r in rows:
-            if not (r.get("Author") and r.get("Person ID")):
-                continue
-            for part in (r.get("Schedule Detail") or "").split("|"):
-                part = part.strip()
-                role = re.search(r"\[([^\]]+)\]$", part)
-                if not part or (role and role.group(1) == "Session Chair"):
-                    continue
-                title = (part[:role.start()] if role else part).rsplit("·", 1)[-1].strip().lower()
-                key = f"{title}|{part.split(' ', 1)[0]}"  # date prefix disambiguates generic titles
-                title_people.setdefault(key, set()).add(r["Person ID"])
-        coauthors: dict[str, set[str]] = {}
-        for ids in title_people.values():
-            if len(ids) > 1:
-                for pid in ids:
-                    coauthors.setdefault(pid, set()).update(ids - {pid})
+        from embed_umap import coauthor_index
+        coauthors = coauthor_index(rows)
 
         spaces = {}
         for key, positions_file, embeddings_file, ids_file in (

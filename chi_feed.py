@@ -68,7 +68,7 @@ def person_name(p: dict) -> str:
     return _clean(" ".join(x for x in (p.get("firstName"), p.get("middleInitial"), p.get("lastName")) if x))
 
 
-def convert(feed: dict) -> tuple[list[dict], list[dict], dict]:
+def convert(feed: dict, edition: str = "") -> tuple[list[dict], list[dict], dict]:
     """Pure: feed JSON -> (author rows, program rows, embed_text). No I/O, so it's testable."""
     tz = ZoneInfo(feed["conference"].get("timeZoneName") or "UTC")
     people = {p["id"]: p for p in feed["people"]}
@@ -82,6 +82,7 @@ def convert(feed: dict) -> tuple[list[dict], list[dict], dict]:
     abstracts: dict[int, list[str]] = {}
     affs: dict[int, list[str]] = {}
     program = []
+    site = re.fullmatch(r"([a-z]+)(\d{4})", edition)
 
     for c in feed["contents"]:
         if c.get("isBreak"):
@@ -114,7 +115,10 @@ def convert(feed: dict) -> tuple[list[dict], list[dict], dict]:
             names = [person_name(people[a["personId"]]) for a in c.get("authors", []) if a["personId"] in people]
             for a in c.get("authors", []):
                 sched.setdefault(a["personId"], []).append(f"{date} {times} · {room} · {sname} · {title} [Author]")
-            doi = (c.get("addons") or {}).get("doi", {}).get("url", "")
+            # DOI when there is one; otherwise the item's page on the official programme site
+            # (61 chi2026 items: journals, some posters, awards, keynotes). "sandbox" has no site.
+            doi = (c.get("addons") or {}).get("doi", {}).get("url", "") or (
+                f"https://programs.sigchi.org/{site.group(1)}/{site.group(2)}/program/content/{cid}" if site else "")
             program.append({
                 "Date": date, "Day": start.strftime("%A"), "Start Time": _clock(start), "End Time": _clock(end),
                 "Location": "" if room == "TBA" else room, "Session Name": sname,
@@ -159,7 +163,7 @@ def sync(edition: str = EDITION, force: bool = False) -> dict:
     key = [version["edition"], version["revision"]]
     if not force and seen.get("key") == key:
         return {"changed": False, "revision": version["revision"]}
-    authors, program, embed_text = convert(_get_json(version["revision_url"]))
+    authors, program, embed_text = convert(_get_json(version["revision_url"]), version["edition"])
     _atomic_write_text(ROOT / "program.csv", _csv(program, PROGRAM_FIELDS))
     _atomic_write_text(EMBED_TEXT_PATH, json.dumps(embed_text))
     _atomic_write_text(ROOT / "authors.csv", _csv(authors, AUTHOR_FIELDS))
