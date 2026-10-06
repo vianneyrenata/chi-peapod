@@ -87,10 +87,9 @@ def send_alert_email(subject: str, body: str) -> None:
 # Optional: drafts a short bio for a brand-new signup via a web-search-backed Haiku call.
 # Absent key = feature quietly disabled (draft_bio() returns None), never a hard error.
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-DRAFT_BIO_SYSTEM_PROMPT = """You are drafting a short STARTING POINT for a conference attendee's bio —
-not a finished biography. They will see their own name directly above this text and are expected to \
-edit and add to it themselves; the goal is to give them a spark to react to, not to write the whole \
-thing for them. You will be given a name and an affiliation.
+DRAFT_BIO_SYSTEM_PROMPT = """You are drafting a STARTING POINT for a conference attendee's research-interest \
+paragraph — not a finished biography. They will see their own name directly above this text and are \
+expected to edit it; the goal is a spark to react to. You will be given a name and an affiliation.
 
 Use the web_search tool to find reliable, directly relevant information: prefer the person's own \
 personal or faculty page, their university's or company's official directory/profile page, or their \
@@ -98,39 +97,40 @@ own publications/lab page. Do not use social-media aggregators, unrelated news m
 about a different person who happens to share the name. Do a small number of targeted searches, not a \
 broad scour.
 
-This bio is for an attendee of the HFES (Human Factors and Ergonomics Society) conference. If your \
-search turns up more than one real person matching this name and affiliation, prefer whichever one \
-works in human factors, ergonomics, or a closely related field (e.g. cognitive engineering, \
-human-computer interaction, safety, UX) — that person is far more likely to be the actual attendee. \
-Only use this to choose between multiple genuine candidates you actually found; never invent a \
-human-factors connection that isn't really there.
+This is for an attendee of ACM CHI (the Conference on Human Factors in Computing Systems). If your search \
+turns up more than one real person matching this name and affiliation, prefer whichever one works in \
+human-computer interaction or a closely related field (interaction design, accessibility, social \
+computing, CSCW, UX research, human-AI interaction) — that person is far more likely to be the actual \
+attendee. Only use this to choose between genuine candidates you actually found; never invent an HCI connection.
 
 If you cannot confidently confirm you found the right person (name and affiliation both line up, or \
 there is strong contextual evidence), your entire final response must be exactly the single word \
-NO_MATCH — no explanation of your search, no reasoning, nothing else, not even a sentence before it.
+NO_MATCH — no explanation, no reasoning, nothing else.
 
-Otherwise, output exactly this template, filled in — always both lines, in this order, nothing before \
-or after:
+Otherwise write ONE coherent, name-free research-interest paragraph. It is shown to readers as-is and \
+embedded for shared-interest matching, so it must read like the other profiles in the app:
 
-**<short punchy headline capturing their research focus, a few words, never their name, never \
-starting with the word "The">**
-<two to three short sentences, about 50 words total, describing their research area and interests>
+Content: Open with the person's central research question or interest, stated as a concrete topic. \
+Preserve specific questions, methods, measures, populations and settings that distinguish the work. \
+If the sources give substantial attention to a second research line, keep it in at least one sentence. \
+Use established technical terms accurately. Preserve the sources' degree of certainty; a suggested or \
+possible interest must not become an established program. Do not invent mechanisms, outcomes, \
+examples, methods or applications you could not verify.
 
-The first line is always present and always wrapped in double asterisks — never skip straight to the \
-sentences. Do not open the body with their name — it's already shown right above this text, so \
-restating it is redundant. You may bold one distinguishing phrase within the body if it helps someone \
-scan it in a few seconds — no more than one. Still leave room for them to add to it: this is a \
-starting point, not a complete biography, so don't try to cover everything you found.
+Style: One paragraph of 90–120 words when the sources support that length; when they cannot support \
+90 accurate words, return a shorter complete paragraph rather than padding. Clear scientific prose, \
+concrete subjects. No title or headline, no Markdown, no names, no author-referential pronouns \
+("she", "his work"), no promotional claims, no rhetorical questions, no generic statements about why \
+the topic matters. Avoid repeated frames such as "This research", "The work", "Research focuses on". \
+Avoid contrast slogans and filler such as "not merely X, but Y" or "Rather than X". Do not mention \
+the conference, the search, the sources, missing information, or that anything was inferred.
 
-Do not fabricate anything you could not verify from the sources you found. Your entire final response \
-must be only those two lines — no preamble like "I'll search for..." or "Based on the results...", no \
-extra paragraphs, no meta-commentary about the search process."""
+Your entire final response must be only that paragraph — no preamble like "I'll search for..." or \
+"Based on the results...", no extra paragraphs, no word count, no meta-commentary."""
 
-# Soft per-IP cooldown against a scripted burst driving up Anthropic spend — this endpoint has no auth
-# (the whole app doesn't). Not a hard budget cap; set a real spending limit in the Anthropic Console too.
-_DRAFT_BIO_LOCK = threading.Lock()
-_draft_bio_last_call: dict[str, float] = {}
-DRAFT_BIO_COOLDOWN_SECONDS = 20
+# No rate limit on drafts (removed 2026-10-06 at the owner's call): a venue's Wi-Fi puts many attendees
+# behind one public IP, so any per-IP limit starves real signups. The only spend guard left is the
+# spending limit set in the Anthropic Console. Each draft holds one of the 32 gunicorn threads for ~8 s.
 
 
 def client_ip(headers, fallback: str) -> str:
@@ -221,21 +221,18 @@ def draft_bio(name: str, aff: str) -> str | None:
     # Confirmed live: even the final block can carry a stray leading fragment (e.g. a trailing "."
     # left over from a truncated lead-in sentence) before the real bio starts.
     text = re.sub(r"^[.\s]+", "", text)
-    # Confirmed live: sometimes a whole preamble sentence ("Based on my search results, I found
-    # that...") precedes the correctly-formatted answer with no tool-call boundary in between for the
-    # block-splitting logic above to key off. A real answer always starts with the bolded headline
-    # line the prompt requires; ordinary narration never uses that markdown — so if a bolded line
-    # appears anywhere, trust it over anything before it rather than the raw block boundaries.
-    headline_match = re.search(r"\*\*[^\n*]+\*\*\n.+", text, re.DOTALL)
-    if headline_match:
-        text = headline_match.group(0).strip()
+    # Confirmed live (with the older headline prompt): a preamble sentence ("Based on my search
+    # results...") can precede the answer with no tool-call boundary to key off. The answer is one
+    # paragraph, so keep the last blank-line-separated paragraph and drop any stray Markdown.
+    # ponytail: last paragraph wins; a two-paragraph answer loses its first half, acceptable for a draft.
+    text = re.split(r"\n\s*\n", text.strip())[-1].replace("**", "").strip()
     # Belt-and-suspenders beyond the prompt: Haiku sometimes narrates its search ("I'll look this
     # up... NO_MATCH") instead of replying with only the sentinel. Treat NO_MATCH appearing anywhere
     # as a decline — the alternative (an exact-match check only) would hand that narration to a real
     # attendee as their "bio," which happened in testing before this check was added.
     if not text or re.search(r"\bNO_MATCH\b", text):
         return None
-    return text[:2000]  # defensive cap; the prompt already asks for ~100 words
+    return text[:2000]  # defensive cap; the prompt already asks for 90-120 words
 
 
 def utcnow() -> str:
@@ -358,9 +355,10 @@ class Catalogue:
         # s_profile is the canonical bio ("**Headline**\nBody", rendered bold client-side by
         # index.html's renderBio()) — same precedence as embed_umap.py's bio_text().
         people = {r["Person ID"]: {"personId": r["Person ID"], "name": r["Author"], "aff": r["Affiliation"],
-            "bio": r.get("s_profile") or r["Interest Profile"] or r["Presentation Titles"] or "No profile on file.",
+            "bio": r.get("s_profile") or r.get("Interest Profile") or r.get("Presentation Titles") or "No profile on file.",
             "isStudent": (r.get("Is Student") or "").strip() == "1",
-            "sideInterest": r.get("Side Interest") or ""}
+            "sideInterest": r.get("Side Interest") or "",
+            "claimed": (r.get("Claimed") or "").strip() == "1"}
             for r in rows if r.get("Author") and r.get("Person ID")}
 
         from embed_umap import coauthor_index
@@ -638,20 +636,31 @@ def queue_rebuild(profile: dict) -> dict:
     placed, so this never refits UMAP or moves anyone else's dot.  The current static embedding
     file remains live meanwhile.
     """
-    current = STORE.current_job()
-    if current and current["status"] in ("queued", "running"):
-        if current["status"] == "queued":
+    # Read-then-decide must be atomic: two signups in the same millisecond both saw "no job"
+    # and each inserted one, but only the last-armed timer fires, stranding the other job
+    # (its people never placed). Found by k6_signup_test.js, 2026-09-28. RLock, so tx() nests.
+    with STORE.lock:
+        current = STORE.current_job()
+        if current and current["status"] in ("queued", "running"):
+            if current["status"] == "queued":
+                with STORE.tx() as db:
+                    row = db.execute("SELECT detail FROM jobs WHERE job_id=%s", (current["job_id"],)).fetchone()
+                    db.execute("UPDATE jobs SET detail=%s WHERE job_id=%s",
+                        (_merge_pending(row["detail"] if row else None, profile), current["job_id"]))
+                if REBUILD_DELAY_SECONDS:
+                    _arm_timer(current["job_id"], REBUILD_DELAY_SECONDS)
+                return {"queued": True, "jobId": current["job_id"], "coalesced": True}
+            # A rebuild is already running for an earlier edit. This edit needs its
+            # own follow-up job so it isn't silently dropped once the running one
+            # finishes; further edits before that follow-up fires coalesce into it
+            # via the "queued" branch above.
+            job_id = secrets.token_urlsafe(12)
             with STORE.tx() as db:
-                row = db.execute("SELECT detail FROM jobs WHERE job_id=%s", (current["job_id"],)).fetchone()
-                db.execute("UPDATE jobs SET detail=%s WHERE job_id=%s",
-                    (_merge_pending(row["detail"] if row else None, profile), current["job_id"]))
+                db.execute("INSERT INTO jobs(job_id,status,requested_at,detail) VALUES(%s,%s,%s,%s)",
+                    (job_id, "queued", utcnow(), _merge_pending(None, profile)))
             if REBUILD_DELAY_SECONDS:
-                _arm_timer(current["job_id"], REBUILD_DELAY_SECONDS)
-            return {"queued": True, "jobId": current["job_id"], "coalesced": True}
-        # A rebuild is already running for an earlier edit. This edit needs its
-        # own follow-up job so it isn't silently dropped once the running one
-        # finishes; further edits before that follow-up fires coalesce into it
-        # via the "queued" branch above.
+                _arm_timer(job_id, REBUILD_DELAY_SECONDS)
+            return {"queued": True, "jobId": job_id, "coalesced": False}
         job_id = secrets.token_urlsafe(12)
         with STORE.tx() as db:
             db.execute("INSERT INTO jobs(job_id,status,requested_at,detail) VALUES(%s,%s,%s,%s)",
@@ -659,13 +668,6 @@ def queue_rebuild(profile: dict) -> dict:
         if REBUILD_DELAY_SECONDS:
             _arm_timer(job_id, REBUILD_DELAY_SECONDS)
         return {"queued": True, "jobId": job_id, "coalesced": False}
-    job_id = secrets.token_urlsafe(12)
-    with STORE.tx() as db:
-        db.execute("INSERT INTO jobs(job_id,status,requested_at,detail) VALUES(%s,%s,%s,%s)",
-            (job_id, "queued", utcnow(), _merge_pending(None, profile)))
-    if REBUILD_DELAY_SECONDS:
-        _arm_timer(job_id, REBUILD_DELAY_SECONDS)
-    return {"queued": True, "jobId": job_id, "coalesced": False}
 
 
 app = Flask(__name__)
@@ -782,13 +784,6 @@ def api_draft_bio():
     aff = str(body.get("aff", "")).strip()[:500]
     if not name:
         return json_response(HTTPStatus.BAD_REQUEST, {"error": "Name is required."})
-    ip = visitor_ip()
-    with _DRAFT_BIO_LOCK:
-        last = _draft_bio_last_call.get(ip, 0.0)
-        now = time.monotonic()
-        if now - last < DRAFT_BIO_COOLDOWN_SECONDS:
-            return json_response(HTTPStatus.TOO_MANY_REQUESTS, {"bio": None})
-        _draft_bio_last_call[ip] = now
     return json_response(HTTPStatus.OK, {"bio": draft_bio(name, aff)})
 
 

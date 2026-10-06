@@ -4,6 +4,11 @@ Status as of 2026-09-28. `[x]` done, `[ ]` open, `[?]` needs a decision first.
 CHI 2027: May 10–14, Pittsburgh. The chi2027 feed goes live in **April 2027**; until then, build against `chi2026`.
 
 ## Session log
+**2026-10-06**
+- Ported hfe-peapod 09-28→10-06 (see CLAUDE.md "Sync with hfe-peapod" and `../hfe-peapod/CHI-SYNC.md`).
+  Still open from that: trim `umap_positions.json` before lowering the data TTL to 30 s; decide what the
+  claimed circle should mean at CHI; CHI-specific copyright/licence line in the page header.
+
 **2026-09-30**
 - Academic accent is now **CHI blue** (light `#1f6fd1` / text+buttons `#1858b0`, 6.9:1 white-on; dark
   `#4b8fe8` / `#6aa8f5` on blue-tinted charcoal). Student purple, Hobby orange unchanged; green kept only

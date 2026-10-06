@@ -38,6 +38,25 @@ have no text and aren't placed. A feed outage only logs; the last good files kee
 Data licence: **CC BY-NC-SA 4.0**. The attribution line under the app card is required; derived data
 (CSVs, embeddings, positions) carries the same licence. The generated files are gitignored.
 
+## Sync with hfe-peapod
+
+Forked at hfe-peapod `62d9af2` (2026-09-28). **Ported on 2026-10-06 up to hfe-peapod `7d50a75`** (see
+`../hfe-peapod/CHI-SYNC.md` for the file-by-file comparison and what was deliberately left out):
+signup-burst race fix in `queue_rebuild()` (+ its test), `Claimed` CSV column → `claimed` on `/api/matches` →
+`.claimed-dot` after names and in the popup (FAQ "How can I actually meet…" explains it: "highly likely at CHI"),
+`lookup()` waits for the attendee list (`DATA_READY`) instead of sending fast typists to "create new profile",
+"a newer map is ready · Refresh" stamp (`checkFreshness()` against `/api/health`, 60 s; Refresh calls
+`loadRealData(true)`, the 10-min background refetch is still there too), new-attendee form is one Short bio box
+(Interests box and `**` tips removed), decorative left dot in rows removed, draft-bio prompt is the name-free
+90–120-word paragraph with **CHI/HCI wording** and **no per-IP cooldown** (set an Anthropic spending limit),
+optional fallback columns (`.get`), nginx bot map + 25-group robots.txt + `deploy/cloudfront-block-bots.js`,
+k6 scripts (file names switched to `authors.csv`/`program.csv`), RECOMPUTE.md. **Not taken:** HFE's
+`@media`-rewriting theme code and `?theme=` override (CHI keeps `html.dark` + `toggleTheme`), the
+"all rights reserved" notice and copyright meta (public repo; only the `noai` robots meta was added), the slim-CSV
+column drop (`Interest Profile` is CHI's displayed bio), and the 30 s data-file TTL (nginx stays at 1 h until
+`umap_positions.json` is trimmed). Selftest and a Playwright pass (guard, stale notice, claimed dot, theme toggle)
+were green after the merge; not deployed anywhere.
+
 ## Commands
 
 ```

@@ -128,6 +128,8 @@ def materialize_db_edits(edits: list[tuple] | None = None) -> int:
         fieldnames = [*fieldnames, "Is Student"]
     if "Side Interest" not in fieldnames:
         fieldnames = [*fieldnames, "Side Interest"]
+    if "Claimed" not in fieldnames:
+        fieldnames = [*fieldnames, "Claimed"]
     by_person_id = {r["Person ID"]: r for r in rows if r.get("Person ID")}
 
     for profile_id, person_id, name, affiliation, bio, is_student, side_interest in edits:
@@ -149,6 +151,9 @@ def materialize_db_edits(edits: list[tuple] | None = None) -> int:
         # Optional non-academic "side interests" text (hobbies etc.) — the second, separate
         # embedding space below. Blank is the common case; blank means "not embedded there".
         row["Side Interest"] = side_interest or ""
+        # Any DB profile row means a real person claimed/created this profile, i.e. is attending —
+        # index.html shows a small circle after the name (see the FAQ entry about it).
+        row["Claimed"] = "1"
 
     sio = io.StringIO()
     writer = csv.DictWriter(sio, fieldnames=fieldnames)
@@ -190,8 +195,8 @@ def bio_text(row) -> str:
     renderBio(), which turns ** into real bold) if present, else the older Interest Profile
     column, else presentation titles as a last resort. ** is stripped here since it's markdown
     noise for the embedding model, not for display (display keeps it, in index.html)."""
-    text = ((row.get("s_profile") or "").strip() or row["Interest Profile"].strip()
-            or row["Presentation Titles"].strip())
+    text = ((row.get("s_profile") or "").strip() or (row.get("Interest Profile") or "").strip()
+            or (row.get("Presentation Titles") or "").strip())
     return feed_text(row.get("Person ID"), text).replace("**", "")
 
 

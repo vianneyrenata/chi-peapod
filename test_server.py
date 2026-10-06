@@ -107,6 +107,24 @@ def test_routes_via_flask_test_client():
     assert r.get_json()["embeddingRefresh"]["queued"] is True
 
 
+def test_simultaneous_signups_coalesce_into_one_job():
+    import threading
+    with server.STORE.tx() as db:
+        db.execute("DELETE FROM jobs")
+    n = 30
+    barrier = threading.Barrier(n)
+    def signup(i):
+        barrier.wait()
+        server.queue_rebuild({"profileId": f"race{i}", "personId": None, "name": f"Race {i}", "bio": "b"})
+    threads = [threading.Thread(target=signup, args=(i,)) for i in range(n)]
+    for th in threads: th.start()
+    for th in threads: th.join()
+    with server.STORE.tx() as db:
+        jobs = db.execute("SELECT detail FROM jobs").fetchall()
+    assert len(jobs) == 1, f"{n} simultaneous signups should coalesce into ONE job, got {len(jobs)}"
+    assert len(json.loads(jobs[0]["detail"])) == n
+
+
 def test_recover_marks_stale_running_as_failed():
     with server.STORE.tx() as db:
         db.execute("DELETE FROM jobs")
@@ -290,8 +308,9 @@ def test_draft_bio_joins_split_final_answer():
     with mock.patch.object(server, "ANTHROPIC_API_KEY", "fake-key-for-test"), \
          mock.patch("urllib.request.urlopen", return_value=fake):
         result = server.draft_bio("Real Person", "Some University")
-    assert result == "**Human-Automation Interaction and Trust**\nInvestigates trust in automation and human-AI teaming.", \
-        f"headline block was dropped: {result!r}"
+    # Prompt no longer asks for a headline (2026-10-06); any stray Markdown is stripped.
+    assert result == "Human-Automation Interaction and Trust\nInvestigates trust in automation and human-AI teaming.", \
+        f"first text block was dropped: {result!r}"
 
 
 def test_draft_bio_strips_preamble_before_headline():
@@ -303,14 +322,14 @@ def test_draft_bio_strips_preamble_before_headline():
         "stop_reason": "end_turn",
         "content": [{"type": "text", "text": (
             "Based on my search results, I found that Real Person holds a PhD from Some University.\n\n"
-            "**Human factors and cognitive load**\nStudies attention under fatigue."
+            "Studies attention under fatigue and cognitive load in control rooms."
         )}],
     })
     with mock.patch.object(server, "ANTHROPIC_API_KEY", "fake-key-for-test"), \
          mock.patch("urllib.request.urlopen", return_value=fake):
         result = server.draft_bio("Real Person", "Some University")
-    assert result == "**Human factors and cognitive load**\nStudies attention under fatigue.", \
-        f"preamble leaked ahead of the headline: {result!r}"
+    assert result == "Studies attention under fatigue and cognitive load in control rooms.", \
+        f"preamble leaked ahead of the paragraph: {result!r}"
 
 
 def test_recover_rearms_queued_timer():
@@ -419,6 +438,7 @@ if __name__ == "__main__":
         test_draft_bio_joins_split_final_answer()
         test_draft_bio_strips_preamble_before_headline()
         test_routes_via_flask_test_client()
+        test_simultaneous_signups_coalesce_into_one_job()
         test_recover_marks_stale_running_as_failed()
         test_recover_rearms_queued_timer()
         test_side_refit_due_when_never_fitted()

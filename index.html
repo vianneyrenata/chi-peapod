@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow, noarchive, noimageindex, noai, noimageai">
 <title>CHI Peapod - Prototype</title>
 <script>if (localStorage.getItem('peapod_theme') === 'dark') document.documentElement.classList.add('dark');</script>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🫛</text></svg>">
@@ -227,6 +228,8 @@
 
   /* three-dot loader over the map while the CSV/embeddings are still on their way */
   .map-stage{ position:relative; }
+  .linkbtn{ background:none; border:0; padding:6px 4px; margin:-6px 0; font:inherit; font-size:inherit; font-weight:700;
+    color:var(--accent-text); text-decoration:underline; cursor:pointer; }
   .map-loading{ display:none; position:absolute; inset:0; align-items:center; justify-content:center; gap:7px; }
   .map-loading.active{ display:flex; }
   .map-loading span{ width:9px; height:9px; border-radius:50%; background:var(--purple); opacity:.35; animation:dotPulse 1.1s ease-in-out infinite; }
@@ -240,8 +243,10 @@
     padding:10px 12px; margin-bottom:8px; cursor:pointer; text-align:left;
     width:100%; font:inherit; color:var(--ink); /* rows are <button>s */
   }
-  .row .dot{ width:8px;height:8px;border-radius:50%; flex-shrink:0; }
   .row .rowname{ font-size:13px; font-weight:600; }
+  /* Soft circle after a name = this profile was claimed, i.e. the person is attending (see FAQ). */
+  .claimed-dot{ display:inline-block; width:7px; height:7px; border-radius:50%; margin-left:6px;
+    vertical-align:middle; background:var(--purple); opacity:.55; }
   .row .rowsub{ font-size:11px; color:var(--gray); }
   .row .score{ margin-left:auto; font-size:11px; font-weight:700; color:var(--accent-text); }
   .row:active{ background:var(--tint); }
@@ -368,10 +373,9 @@
       <button class="backbtn" onclick="show('keyin')">←</button>
       <h1>Welcome!</h1>
       <p class="sub">You're new here - tell us a bit about your work so we can match you.</p>
-      <label>Interests / research areas</label>
-      <textarea id="inInterests" placeholder="e.g. accessibility, tangible interfaces, social computing..."></textarea>
-      <label>Short bio <span style="font-weight:400;">- tip: wrap text in **double asterisks** to bold it</span></label>
-      <textarea id="inBio" placeholder="One or two sentences about you"></textarea>
+      <div class="banner warn" id="draftNote" style="display:none; margin-bottom:10px;">We couldn't find anything about you online. Please replace the placeholder below with a few sentences about your work.</div>
+      <label>Short bio</label>
+      <textarea id="inBio" placeholder="A few sentences about what you work on, e.g. accessibility, tangible interfaces, social computing"></textarea>
       <label>Non-academic interests <span style="font-weight:400;">- optional, for the Side Interests view</span></label>
       <textarea id="inSideInterest" placeholder="e.g. fountain pens, mechanical keyboards, running"></textarea>
       <div class="spacer"></div>
@@ -422,7 +426,7 @@
         <input type="text" id="profName" readonly>
         <label>Affiliation</label>
         <input type="text" id="profAff" readonly>
-        <label>Profile <span id="profBioHint" style="font-weight:400;">- tip: wrap text in **double asterisks** to bold it</span></label>
+        <label>Profile</label>
         <textarea id="profBio" readonly></textarea>
         <div id="profBioView" style="display:none; white-space:pre-line; text-align:left; font-size:15px; color:var(--ink); padding:2px 0;"></div>
         <label>Non-academic interests <span id="profSideHint" style="font-weight:400;">- optional, for the Side Interests view</span></label>
@@ -544,7 +548,11 @@
               presenting, their session is a natural place to catch them. You can also ask around: if you
               know their affiliation, lab, or co-authors, someone there likely knows them and can introduce
               you. Half the fun of a conference
-              is asking around and making a new friend that way :)</div>
+              is asking around and making a new friend that way :)
+              <br><br>A small circle after someone's name <span class="claimed-dot" aria-hidden="true"></span> means
+              they have claimed their profile in this app, so they are highly likely at CHI. Everyone else is
+              listed from the conference program and may or may not be here.</div>
+
           </div>
           <div class="faq-item">
             <div class="faq-q">How are Top Programs generated?</div>
@@ -664,6 +672,7 @@
 </div>
 
 <script>
+// Appearance: stored as 'system' (default, follows the phone), 'light' or 'dark'. The profile popup shows one
 // ---------- data ----------
 const CLUSTERS = {
   hri:   {label:'Human-Robot Interaction / General HF', color:'#7B61FF'},
@@ -849,6 +858,11 @@ function escapeHtml(s){
 }
 // Bios (s_profile, or anyone's self-typed edit) can contain **word** — render that as real
 // bold. Escape first so a self-typed bio can't inject markup; only ** pairs we wrap ourselves.
+// Escaped name plus the claimed-profile circle (CSS .claimed-dot) when the person claimed it.
+function nameHtml(p){
+  return escapeHtml(p.name) + (p.claimed ? '<span class="claimed-dot" role="img" aria-label="attending, profile claimed"></span>' : '');
+}
+
 function renderBio(bio){
   return escapeHtml(bio).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
 }
@@ -962,6 +976,33 @@ function deterministicPos(name, cluster){
 }
 
 let DATA_LOADED_AT = 0;
+// Freshness: the map data can be up to 30 s behind the server (CloudFront), and a tab left open
+// drifts further. /api/health is never cached, so its generatedAt is the truth; when it's newer
+// than what this page loaded, say so and offer a refresh instead of letting people wonder.
+let SERVER_GENERATED_AT = null;
+let dataReadyResolve;
+const DATA_READY = new Promise(r => { dataReadyResolve = r; });  // resolved once loadRealData() has ATTENDEES
+async function checkFreshness(){
+  try { SERVER_GENERATED_AT = (await api('/api/health')).generatedAt || null; } catch (_) { return; }
+  if (currentUser && document.querySelector('[data-screen="home"]').classList.contains('active')) renderEmbeddingsStamp();
+}
+function renderEmbeddingsStamp(){
+  const el = document.getElementById('embeddingsUpdated');
+  if (!EMBEDDINGS_GENERATED_AT){ el.textContent = 'Profile embeddings not generated yet - showing placeholder positions.'; return; }
+  const stale = SERVER_GENERATED_AT && SERVER_GENERATED_AT > EMBEDDINGS_GENERATED_AT;  // same ISO format, string compare is fine
+  el.innerHTML = `Profile embeddings last updated: ${escapeHtml(new Date(EMBEDDINGS_GENERATED_AT).toLocaleString())}`
+    + (stale ? ` &middot; a newer map is ready <button class="linkbtn" onclick="refreshData()">Refresh</button>` : '');
+}
+async function refreshData(){
+  document.getElementById('embeddingsUpdated').textContent = 'Retrieving the latest map…';
+  document.getElementById('mapLoading').classList.add('active');
+  await loadRealData(true);   // re-fetches with cache:'no-cache'; may still get the edge copy for up to 30 s
+  await checkFreshness(); // so re-check: if still behind, the Refresh link simply stays
+  document.getElementById('mapLoading').classList.remove('active');
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkFreshness(); });
+setInterval(() => { if (!document.hidden) checkFreshness(); }, 60000);
+
 async function loadRealData(background = false){
   try {
     // cache:'no-cache' forces a revalidation with the server on every page load instead of
@@ -1089,6 +1130,10 @@ async function loadRealData(background = false){
         // Internal-only tag (see CLAUDE.md) that powers Student View's map/match filtering —
         // never rendered as a badge or label anywhere in the UI.
         isStudent: (a['Is Student']||'').trim() === '1',
+        // Set by embed_umap.py's materialize_db_edits() for every DB profile row: the person
+        // claimed/created this profile themselves, so they're attending. Shown as a soft circle
+        // after the name (nameHtml()), explained in the FAQ.
+        claimed: (a['Claimed']||'').trim() === '1',
         presentations,
         cluster, ...(emb ? { x: emb.x, y: emb.y } : deterministicPos(a.Author, cluster)),
         topMatches: emb ? emb.topMatches : null,
@@ -1121,6 +1166,8 @@ async function loadRealData(background = false){
       if (onFile) currentUser = {...onFile, ...currentUser, x:onFile.x, y:onFile.y, topMatches:onFile.topMatches, sideX:onFile.sideX, sideY:onFile.sideY, sideTopMatches:onFile.sideTopMatches};
       renderHome();
     }
+    checkFreshness();
+    dataReadyResolve();
   } catch(err){
     // No fictional fallback data — ATTENDEES/LECTURES just stay empty. This is a real, total
     // failure to load the app (not the normal "no data yet" state), so say so plainly instead
@@ -1217,8 +1264,8 @@ function renderSuggestList(candidates, subText){
     row.className = 'row';
     row.style.cssText = 'width:100%; border:1px solid var(--line); font:inherit; cursor:pointer;';
     row.onclick = () => acceptSuggestion(i);
-    row.innerHTML = `<div class="dot" style="background:var(--purple)"></div>
-      <div><div class="rowname">${escapeHtml(c.name)}</div><div class="rowsub">${escapeHtml(c.aff)}</div></div>`;
+    row.innerHTML = `
+      <div><div class="rowname">${nameHtml(c)}</div><div class="rowsub">${escapeHtml(c.aff)}</div></div>`;
     list.appendChild(row);
   });
   show('typo');
@@ -1365,9 +1412,21 @@ function lookup(){
   // that person's review screen directly — with 23 Chens and 21 Kims on file, a hasty "OK, that's me"
   // could claim (and edit) someone else's profile. With an affiliation always present, an exact match
   // either also matches the affiliation (open the review screen) or asks "is this you?" first.
+  const note = document.getElementById('keyinNote');
   if(!aff){
-    document.getElementById('keyinNote').style.display = 'block';
+    note.textContent = 'Please add your affiliation.';
+    note.style.display = 'block';
     document.getElementById('inAff').focus();
+    return;
+  }
+  // The attendee list is still downloading (or failed): matching against an empty list would
+  // send a real attendee straight to "create new profile" and make a duplicate.
+  if(!ATTENDEES.length){
+    note.textContent = 'Loading the attendee list… one moment.';
+    note.style.display = 'block';
+    // Nothing for them to do: the fetch is already in flight. Finish their lookup when it lands
+    // (a failed load shows the loaderror screen instead, so this never fires on failure).
+    DATA_READY.then(() => { if (document.querySelector('[data-screen="keyin"]').classList.contains('active')) lookup(); });
     return;
   }
 
@@ -1458,9 +1517,8 @@ function stopDraftingAnimation(){
 // routed to "create new profile," before the form is even shown) — but if they somehow already
 // typed something first, still offer the draft rather than silently overwriting their own words.
 function offerDraftedBio(bio){
-  const interestsEl = document.getElementById('inInterests');
   const bioEl = document.getElementById('inBio');
-  const hasExisting = interestsEl.value.trim() || bioEl.value.trim();
+  const hasExisting = bioEl.value.trim();
   // The drafting screen runs before the form is ever shown, so the box is virtually always empty
   // here and the draft just lands in it. In the rare case someone already typed, keep their words —
   // no dialog, no sheet (a prompt here was judged not worth the interruption).
@@ -1473,7 +1531,7 @@ function offerDraftedBio(bio){
 // something is to get people to personalize it, and a bunch of attendees left with the exact same
 // text would also make their embeddings — and therefore their matches — look identical to each
 // other instead of reflecting what they actually work on.
-const FALLBACK_BIO = "**Human Factors & Ergonomics Researcher**\nNew to the directory - replace this line with a sentence or two about what you actually work on.";
+const FALLBACK_BIO = "New to the directory - replace this with a few sentences about what you actually work on.";
 
 async function goCreateNewProfile(){
   const name = document.getElementById('inName').value.trim();
@@ -1493,22 +1551,22 @@ async function goCreateNewProfile(){
     equally "no draft available," never block signup on it */ }
   stopDraftingAnimation();
   show('newattendee');
+  document.getElementById('draftNote').style.display = 'none';
   if (draftedBio) {
     offerDraftedBio(draftedBio);
-  } else if (!document.getElementById('inInterests').value.trim() && !document.getElementById('inBio').value.trim()){
+  } else if (!document.getElementById('inBio').value.trim()){
     // Unlike a real draft, a generic placeholder isn't worth interrupting someone who already
     // started typing their own bio to ask "use this instead?" — only fill it in when blank.
     document.getElementById('inBio').value = FALLBACK_BIO;
+    document.getElementById('draftNote').style.display = 'block';  // tell them why the box holds a placeholder
   }
 }
 
 function createNewProfile(){
   const name = document.getElementById('inName').value.trim() || 'New Attendee';
   const aff = document.getElementById('inAff').value.trim();
-  const interests = document.getElementById('inInterests').value.trim();
-  const bio = document.getElementById('inBio').value.trim();
   const sideInterest = document.getElementById('inSideInterest').value.trim();
-  const fullBio = [interests, bio].filter(Boolean).join('. ') || 'No bio yet.';
+  const fullBio = document.getElementById('inBio').value.trim() || 'No bio yet.';
   const cluster = classify(fullBio);
   const profile = { name, aff, cluster, bio: fullBio, sideInterest, ...deterministicPos(name, cluster) };
   showProfile(profile, false);
@@ -1522,7 +1580,6 @@ function autosizeBio(){
   const side = document.getElementById('profSideInterest');
   side.placeholder = ta.readOnly ? 'None' : 'e.g. fountain pens, mechanical keyboards, running';
   document.getElementById('profSideHint').style.display = ta.readOnly ? 'none' : 'inline';
-  document.getElementById('profBioHint').style.display = ta.readOnly ? 'none' : 'inline';
   if (ta.readOnly){
     // View mode: show the rendered (real bold) version instead of the raw textarea, so
     // "**word**" doesn't sit there as literal asterisks while just reviewing/confirming.
@@ -1820,9 +1877,7 @@ function showMoreLectures(){ lectureVisibleCount += 3; renderHome(); }
 // ---------- home rendering ----------
 function renderHome(){
   document.getElementById('homeAvatarBtn').textContent = initials(currentUser.name);
-  document.getElementById('embeddingsUpdated').textContent = EMBEDDINGS_GENERATED_AT
-    ? `Profile embeddings last updated: ${new Date(EMBEDDINGS_GENERATED_AT).toLocaleString()}`
-    : 'Profile embeddings not generated yet - showing placeholder positions.';
+  renderEmbeddingsStamp();
 
   // A profile switch (claim someone else after "Not you? Reset") can leave viewMode pointed at
   // Students while the new "you" isn't one — the picker wouldn't even offer that option anymore,
@@ -1951,8 +2006,8 @@ function renderHome(){
     const row = document.createElement('button');
     row.className='row';
     row.onclick = () => { focusPersonOnMap(p); openBubble(p); };
-    row.innerHTML = `<div class="dot" style="background:var(--purple)"></div>
-      <div class="rowname">${escapeHtml(p.name)}</div>
+    row.innerHTML = `
+      <div class="rowname">${nameHtml(p)}</div>
       <div class="score">${p.score}%</div>`;
     tm.appendChild(row);
   });
@@ -1993,7 +2048,7 @@ function renderHome(){
       row.className = 'row';
       row.style.cssText = 'width:100%; border:1px solid var(--line); font:inherit; cursor:pointer; align-items:flex-start; text-align:left;';
       row.onclick = () => openProgramBubble(l);
-      row.innerHTML = `<div class="dot" style="background:var(--purple); margin-top:5px;"></div>
+      row.innerHTML = `
         <div>
           <div class="rowname">${escapeHtml(l.title)}</div>
           <div class="rowsub" style="margin-top:2px;">${fmtProgramWhen(l)}${sessionsOf(l).length > 1 ? ` (+${sessionsOf(l).length - 1} more time)` : ''}</div>
@@ -2018,7 +2073,7 @@ function openBubble(p){
   currentBubblePerson = p;
   const isSelf = currentUser && p.name === currentUser.name;
   document.getElementById('bubAvatar').textContent = initials(p.name);
-  document.getElementById('bubName').textContent = p.name + (isSelf ? ' (you)' : '');
+  document.getElementById('bubName').innerHTML = nameHtml(p) + (isSelf ? ' (you)' : '');
   document.getElementById('bubAff').textContent = p.aff;
   document.getElementById('bubBio').innerHTML = renderBio(sideViewOn ? (p.sideInterest || 'No side interests on file.') : p.bio);
   const presBox = document.getElementById('bubPresenting');
@@ -2075,8 +2130,8 @@ function openSavedList(){
     row.className = 'row';
     row.style.cssText = 'width:100%; border:1px solid var(--line); font:inherit; cursor:pointer;';
     row.onclick = () => { closeSavedOverlay(); openBubble(p); };
-    row.innerHTML = `<div class="dot" style="background:var(--purple)"></div>
-      <div><div class="rowname">${escapeHtml(p.name)}</div><div class="rowsub">${escapeHtml(p.aff)}</div></div>`;
+    row.innerHTML = `
+      <div><div class="rowname">${nameHtml(p)}</div><div class="rowsub">${escapeHtml(p.aff)}</div></div>`;
     list.appendChild(row);
   });
   document.getElementById('savedOverlay').classList.add('active');
@@ -2230,8 +2285,8 @@ function runSearch(){
     row.className = 'row';
     row.style.cssText = 'width:100%; border:1px solid var(--line); font:inherit; cursor:pointer;';
     row.onclick = () => { focusPersonOnMap(p); openBubble(p); };
-    row.innerHTML = `<div class="dot" style="background:var(--purple)"></div>
-      <div><div class="rowname">${escapeHtml(p.name)}</div><div class="rowsub">${escapeHtml(p.aff)}</div></div>`;
+    row.innerHTML = `
+      <div><div class="rowname">${nameHtml(p)}</div><div class="rowsub">${escapeHtml(p.aff)}</div></div>`;
     box.appendChild(row);
   });
 }

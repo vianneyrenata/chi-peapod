@@ -7,15 +7,21 @@ lanes:
    the API keeps the attendee and precomputed-match indexes in memory. This is
    the only lane used by normal browsing and works well for the expected
    100–200 concurrent people.
-2. **Write lane:** profile and saved-contact updates use SQLite in WAL mode.
-   WAL permits readers while a brief write is committed. A profile update adds
-   the changed profile to a durable `queued` rebuild job's pending list; more
-   updates coalesce into that same job (deduped by person, latest text wins).
-3. **Compute lane:** after a 3-minute quiet period, the production API places
-   the whole pending list in ONE `embed_umap.py incremental --batch` subprocess
-   — one model load, one batch encode, one write, regardless of how many
-   profiles are pending (a 100-person burst costs one model load, not 100). It
-   never runs during an attendee request. Publish only after the complete new
+2. **Write lane:** profile updates go to Postgres (saved contacts stay in the
+   browser). A profile update adds the changed profile to a durable `queued`
+   rebuild job's pending list; more updates coalesce into that same job (deduped
+   by person, latest text wins). The read-then-decide ("is there a queued job to
+   join, or do I open one?") runs under one in-process lock — without it, signups
+   landing in the same millisecond each opened their own job, and since only one
+   timer exists, all but the last-armed job stayed queued forever (found and fixed
+   2026-09-28). This is also why the API is ONE process: that lock, the timer and
+   the rate limits live in process memory.
+3. **Compute lane:** after a 2-second quiet period, the API hands the whole
+   pending list to the warm `hfes-match-worker` (model and UMAP already loaded;
+   ~1 s), falling back to ONE `embed_umap.py incremental --batch` subprocess if
+   the worker is down (~30 s, mostly imports) — either way one batch encode and
+   one write regardless of how many profiles are pending (a 100-person burst
+   costs one pass, not 100). It never runs during an attendee request. Publish only after the complete new
    `umap_positions.json` exists, so visitors always see either the previous
    complete match set or the next complete match set—never a partial result.
 
@@ -42,16 +48,17 @@ full` directly.
 Operational defaults:
 
 - New/edited profiles are usable immediately; the edited/new person sees their
-  own fresh position and matches as soon as the queued job runs (up to the
-  3-minute quiet window), without waiting on or triggering a full rebuild.
+  own fresh position and matches as soon as the queued job runs (~3 s end to end
+  with the warm worker; the browser polls `/api/placement` for it), without
+  waiting on or triggering a full rebuild.
 - A new profile receives a generated profile ID from the API. The browser keeps
   that ID locally; the queued incremental job materializes it into the CSV
   (via `materialize_db_edits()`) and uses it as the stable attendee/UMAP ID.
 - Check `GET /api/rebuild` from monitoring. It reports `queued`, `running`,
   `complete`, or `failed` plus timestamps; `detail` holds the pending-profiles
   list while queued/running, and a short summary or failure detail once done.
-- The service automatically starts the worker when the queued job has been
-  quiet for 3 minutes. Additional edits coalesce into the queued job's
+- The service automatically starts the job when the queued list has been
+  quiet for 2 seconds. Additional edits coalesce into the queued job's
   pending list; an edit arriving during a running rebuild creates one
   follow-up queued job.
 - Keep one worker only. A second trigger while a build is running returns the
