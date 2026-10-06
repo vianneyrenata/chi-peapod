@@ -13,3 +13,5 @@ feed_revision.json
 *embeddings.npy
 *embeddings_person_ids.json
 *umap_reducer.joblib
+
+profile_pipeline/output/
