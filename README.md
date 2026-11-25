@@ -62,3 +62,9 @@ The code was written with Anthropic's Claude (Claude Code), with me directing, r
 testing every change — fully AI-assisted coding, in other words. The idea, the overall design and
 architecture, the interaction flow, and the peapod mascot and logo (`img-asset/`) are my own
 original work. If you find something wrong, the person to blame is me, not the model.
+
+## Licence
+
+The code is MIT licensed (see `LICENSE`). The programme data stays under CHI's CC BY-NC-SA 4.0 terms and is not part of this repository. The peapod mascot and logo in `img-asset/` are my own work; please ask before reusing them.
+
+If you run Peapod at your conference, I'd love to hear about it.
