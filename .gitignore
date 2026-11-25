@@ -11,6 +11,7 @@ program.csv
 embed_text.json
 feed_revision.json
 *umap_positions.json
+hobby_sim.json
 *embeddings.npy
 *embeddings_person_ids.json
 *umap_reducer.joblib
