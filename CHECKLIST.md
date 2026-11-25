@@ -4,6 +4,20 @@ Status as of 2026-09-28. `[x]` done, `[ ]` open, `[?]` needs a decision first.
 CHI 2027: May 10–14, Pittsburgh. The chi2027 feed goes live in **April 2027**; until then, build against `chi2026`.
 
 ## Session log
+**2026-11-25 (evening) — paused mid-task, resume here**
+- **Bios for everyone (owner's decision):** `profile_pipeline/generate_bios.py --full --workers 4` is resumable and was
+  stopped cleanly at **2,857 of ~4,250** distinct texts (`profile_pipeline/output/chi_bios.jsonl`). Resume with the same
+  command. `chi_feed.py` now prefixes the displayed bio with the paragraph when `chi_bios.jsonl` has that person
+  (`generated_bios()`), titles still follow. **Not yet on the server:** after the run finishes, rsync the jsonl
+  (deploy.sh includes `profile_pipeline/output/`), run `chi_feed.py --force` there and restart `hfes-match`.
+- **Video:** draft at `video/build/peapod-draft.mp4` (3:00, captions in place of narration). Tools: `video/intro.html`,
+  `video/meet.html`, `video/cards.html`, `video/record_app.py` (new-profile path), `video/record_app2.py` (claim path,
+  home overview, view picker), `video/assemble.py`. Local recording needs devproxy + server with
+  `HFES_AUTO_REBUILD_SECONDS=3` + the warm worker; the local DB holds test profiles (Vianney + 3 seeded hobby/student
+  rows) — local only. Waiting on the owner's webcam story clip and per-section narration in `video/raw/`.
+- Screen-reader path shipped and deployed (see the VoiceOver item). Draft one-liner, 300-word description and
+  3-minute script are in the chat/`video/script.md`.
+
 **2026-11-25**
 - Pushed to GitHub (private for now): https://github.com/vianneyrenata/chi-peapod. README in the owner's voice
   with the AI-assistance disclaimer; comments trimmed across the Python files and `index.html`.

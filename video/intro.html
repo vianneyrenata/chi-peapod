@@ -65,10 +65,10 @@ const T=[
  [18.5,()=>{show('c3',false);show('c4',false);['b1','b2','b3'].forEach(b=>$(b).style.opacity=0);$('phone').style.top='330px';}],
  [19.5,()=>show('c5')],[22,()=>show('c6')],
  [25,()=>{show('c5',false);show('c6',false);$('phone').style.top='1120px';drifting=false;
-   dots.forEach((d,i)=>{const c=centers[i%8];const a=rnd()*Math.PI*2,r=40+rnd()*150;d.style.left=(c[0]+Math.cos(a)*r)+'px';d.style.top=(c[1]+Math.sin(a)*r*.7)+'px';d.style.background=palette[i%8];d.style.opacity=.9;});
-   you.style.left='1200px';you.style.top='500px';}],
+   dots.forEach((d,i)=>{const c=centers[(i*5+3)%8];const a=rnd()*Math.PI*2,r=40+rnd()*150;d.style.left=(c[0]+Math.cos(a)*r)+'px';d.style.top=(c[1]+Math.sin(a)*r*.7)+'px';d.style.opacity=.9;});
+   you.style.left='520px';you.style.top='880px';}],
  [28.5,()=>{show('brand');dots.forEach(d=>d.style.opacity=.18);}],
- [33,()=>{dots.forEach((d,i)=>{d.style.opacity=(i%8===2)?.45:.12;});}],
+ [33,()=>{dots.forEach((d,i)=>{d.style.opacity=((i*5+3)%8===4)?.5:.12;});}],
  [40,()=>{}]
 ];
 T.forEach(([t,f])=>setTimeout(f,t*1000));

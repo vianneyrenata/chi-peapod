@@ -118,11 +118,14 @@ def convert(feed: dict, edition: str = "") -> tuple[list[dict], list[dict], dict
             })
 
     authors, embed_text = [], {}
+    bios = generated_bios()
     for pid in sorted(set(titles) | set(sched)):
         if pid not in people:
             continue
         own = list(dict.fromkeys(titles.get(pid, [])))  # dedupe, keep order
         display = ("**At " + feed["conference"].get("name", "CHI") + "**\n" + "\n".join(own)) if own else ""
+        if own and str(pid) in bios:  # Haiku paragraph first, titles after it
+            display = bios[str(pid)] + "\n\n" + display
         text = " ".join(own + [a for a in abstracts.get(pid, []) if a])[:EMBED_CHARS]
         authors.append({
             "Author": person_name(people[pid]), "Affiliation": "; ".join(affs.get(pid, [])),
@@ -133,6 +136,26 @@ def convert(feed: dict, edition: str = "") -> tuple[list[dict], list[dict], dict
         if text:
             embed_text[str(pid)] = [display, text]
     return authors, program, embed_text
+
+
+BIOS_PATH = ROOT / "profile_pipeline/output/chi_bios.jsonl"
+
+
+def generated_bios() -> dict[str, str]:
+    """person_id -> short paragraph from profile_pipeline/generate_bios.py, if the file exists."""
+    out: dict[str, str] = {}
+    if not BIOS_PATH.exists():
+        return out
+    for line in BIOS_PATH.open(encoding="utf-8"):
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        text = (r.get("summary") or "").strip()
+        if text:
+            for pid in r.get("person_ids", []):
+                out[str(pid)] = text
+    return out
 
 
 def _csv(rows: list[dict], fields: list[str]) -> str:

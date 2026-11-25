@@ -1,0 +1,39 @@
+<!doctype html><html><head><meta charset="utf-8"><link href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;900&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;width:1920px;height:1080px;background:#15171c;color:#f4f1ea;font-family:Nunito,sans-serif;overflow:hidden}
+.cap{position:absolute;left:0;right:0;top:110px;text-align:center;font-size:60px;font-weight:900;opacity:0;transition:opacity .8s}
+#list{position:absolute;left:300px;top:330px;width:420px;background:#fff;border-radius:28px;padding:28px 30px;color:#1858b0;box-shadow:0 20px 60px rgba(0,0,0,.5);transition:opacity .8s}
+#list h3{margin:0 0 18px;font-size:30px}
+.sq{width:60px;height:60px;border-radius:12px;background:#e8a26b;display:inline-block;margin:10px 14px 10px 0;vertical-align:middle;transition:transform .6s}
+.sq.b{background:#c97bd6}.sq.c{background:#6fc3a3}
+.lbl{display:inline-block;vertical-align:middle;color:#333;font-size:26px;font-weight:700}
+#me{position:absolute;left:180px;top:520px;width:90px;height:90px;border-radius:50%;background:#4b8fe8;box-shadow:0 0 0 10px rgba(75,143,232,.25),0 0 50px #4b8fe8;transition:left 2.2s cubic-bezier(.4,0,.2,1),top 2.2s cubic-bezier(.4,0,.2,1)}
+#room{position:absolute;left:1180px;top:430px;width:460px;height:300px;border:4px dashed #555;border-radius:28px;opacity:0;transition:opacity .8s}
+#room .tag{position:absolute;left:20px;top:-24px;background:#15171c;padding:0 12px;font-size:28px;font-weight:700;color:#8a8f9c}
+#them{position:absolute;left:1420px;top:560px;width:90px;height:90px;border-radius:18px;background:#e8a26b;transition:transform .6s;opacity:0}
+.bub{position:absolute;background:#f4f1ea;color:#15171c;font-weight:700;font-size:30px;padding:16px 24px;border-radius:26px;opacity:0;transform:translateY(10px);transition:opacity .5s,transform .5s;white-space:nowrap}
+.bub:after{content:"";position:absolute;left:34px;bottom:-14px;border:14px solid transparent;border-top-color:#f4f1ea;border-bottom:0}
+.bub.r:after{left:auto;right:34px}
+#nochat{position:absolute;left:0;right:0;top:880px;text-align:center;font-size:40px;font-weight:700;color:#d9d4c7;opacity:0;transition:opacity .8s}
+</style></head><body>
+<div class="cap" id="c1">Peapod points you at a person and a room.</div>
+<div class="cap" id="c2">The meeting happens in person.</div>
+<div id="list"><h3>⭐ Top matches for you</h3>
+  <div><span class="sq" id="s1"></span><span class="lbl">69% · Room 310, 11:00</span></div>
+  <div><span class="sq b"></span><span class="lbl">66%</span></div>
+  <div><span class="sq c"></span><span class="lbl">64%</span></div></div>
+<div id="me"></div>
+<div id="room"><div class="tag">Room 310 · 11:00</div></div>
+<div id="them"></div>
+<div class="bub" id="b1" style="left:1260px;top:470px">hi! I saw we both work on this…</div>
+<div class="bub r" id="b2" style="left:1300px;top:760px">oh! come, meet my lab</div>
+<div id="nochat">No chat in Peapod. On purpose.</div>
+<script>
+const $=id=>document.getElementById(id), show=(id,on=true)=>$(id).style.opacity=on?1:0;
+const T=[[0.4,()=>show('c1')],[1.2,()=>{$('s1').style.transform='scale(1.2)'}],[2.2,()=>{show('room');show('them');$('s1').style.transform=''}],
+ [3.0,()=>{$('me').style.left='1300px';$('me').style.top='560px';$('list').style.opacity=.35}],
+ [5.4,()=>{show('c1',false);show('c2')}],[5.8,()=>{const b=$('b1');b.style.opacity=1;b.style.transform='translateY(0)'}],
+ [7.4,()=>{$('them').style.transform='scale(1.15)';const b=$('b2');b.style.opacity=1;b.style.transform='translateY(0)'}],
+ [8.6,()=>show('nochat')],[11,()=>{}]];
+T.forEach(([t,f])=>setTimeout(f,t*1000));
+</script></body></html>
