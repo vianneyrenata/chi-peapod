@@ -13,6 +13,11 @@ CHI 2027: May 10–14, Pittsburgh. The chi2027 feed goes live in **April 2027**;
   Deleted `loadtest.py` / `locustfile.py` (k6 stays). Audit decisions: Hobby space, alert email, worker fallback,
   rebuild endpoints, env knobs, CSV columns all kept for parity with hfe-peapod.
 - New env on the server: `HFES_DASHBOARD_TOKEN` (dashboard password), SMTP vars for the alert email (needed).
+- **Deployed** to ec2-3-135-14-220.us-east-2.compute.amazonaws.com (t3.medium-class: 2 vCPU, 3.7 GB, 15 GB disk,
+  Ubuntu 26.04) with `deploy/deploy.sh` + bootstrap. First start: the API now serves an empty catalogue until the
+  poller's first sync (fix in `server.py`), then the full build took ~6 min on the box. Env: chi2026 feed,
+  poll 900 s, dashboard token set. Still to do: SMTP creds in `/etc/hfes-match.env`; CloudFront
+  (d152a4pgizvo84.cloudfront.net) returns 504 — its origin must be the EC2 DNS name over **HTTP only**.
 
 **2026-11-03**
 - Ran `chi_feed.py` on the **sandbox** edition (revision 2, CHI 2025 data + seeded edge cases).
