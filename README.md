@@ -1,4 +1,4 @@
-<p align="center"><img src="img-asset/peapod.svg" alt="Peapod" width="160"></p>
+<p align="center"><img src="img-asset/peapod-mascot-v2.png" alt="Peapod" width="160"></p>
 
 # CHI Peapod
 
