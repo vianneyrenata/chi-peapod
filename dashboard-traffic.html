@@ -1,0 +1,136 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex, nofollow"><title>CHI Peapod · traffic</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<style>
+:root{--ink:#1d1d2b;--gray:#6b6b7e;--line:#e4e4ee;--acc:#137a54;--acc2:#7B61FF;--acc3:#d9731a;--tint:#eef8f3}
+*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--ink);background:#f6f6fa}
+main{max-width:1000px;margin:0 auto;padding:18px 20px 60px}h1{font-size:20px;margin:0 0 4px}.sub{color:var(--gray);margin:0 0 16px}
+.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px 16px;margin:0 0 14px}
+h2{font-size:14px;margin:0 0 8px;text-transform:uppercase;letter-spacing:.04em;color:var(--gray)}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}input,select,button{font:inherit;padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:#fff}
+button{cursor:pointer;background:var(--acc);color:#fff;border-color:var(--acc)}button.res{background:#fff;color:var(--ink);padding:5px 10px}button.res.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}.kpi{background:var(--tint);border-radius:10px;padding:10px 12px}
+.kpi b{display:block;font-size:22px}.kpi span{color:var(--gray);font-size:12px}
+svg{width:100%;height:auto;display:block}.legend{font-size:12px;color:var(--gray);margin-top:6px}.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin:0 4px 0 10px;vertical-align:middle}
+table{border-collapse:collapse;width:100%;font-size:13px}td,th{text-align:left;padding:4px 6px;border-top:1px solid var(--line)}th{color:var(--gray);font-weight:600}td.n{text-align:right;font-variant-numeric:tabular-nums}
+.err{color:#b42318}.funnel{display:flex;gap:6px;flex-wrap:wrap}.funnel div{flex:1;min-width:110px;background:var(--tint);border-radius:8px;padding:8px 10px}.funnel b{display:block;font-size:18px}.funnel span{font-size:12px;color:var(--gray)}
+</style></head><body><main>
+<h1>CHI Peapod · traffic</h1><div class="card"><div class="row"><input id="tok" type="password" placeholder="dashboard password" style="min-width:220px">
+<label style="font-size:13px;color:var(--gray)">from <input type="date" id="from"></label> <label style="font-size:13px;color:var(--gray)">to <input type="date" id="to"></label>
+<select id="tz" title="time zone for the charts"><option value="UTC">UTC</option><option value="America/Los_Angeles">Pacific</option><option value="America/Denver">Mountain</option><option value="America/Chicago">Central</option><option value="America/New_York">Eastern</option></select>
+<button id="go">Load</button><span id="msg" class="err"></span></div></div>
+<div id="out" style="display:none">
+<div class="card"><h2>Totals (from–to, chosen zone)</h2><div class="kpis" id="kpis"></div></div>
+<div class="card"><div class="row" style="margin-bottom:6px"><h2 style="margin:0">Over time · <span id="dayLabel"></span></h2>
+<span style="margin-left:auto" class="row"><span class="legend" style="margin:0">resolution</span>
+<button class="res" data-res="day">day</button><button class="res" data-res="hour">hour</button><button class="res" data-res="minute">minute</button></span></div>
+<div id="chart" style="height:340px"></div>
+<div class="legend">Stacked: page opens · people (first-time claimed + created, from the edit ledger) · interactions. Scroll or pinch on the chart to zoom, drag the slider underneath to pan, hover a bar for the breakdown. Zoom survives a resolution change.</div></div>
+<div class="card"><h2>Sign-in funnel (range)</h2><div class="funnel" id="funnel"></div></div>
+<div class="card"><h2>Everything, by kind</h2><table id="kinds"></table></div>
+<div class="card"><h2>Placement jobs (range)</h2><table id="jobs"></table></div>
+<div class="card"><details><summary style="cursor:pointer;font-size:14px;text-transform:uppercase;letter-spacing:.04em;color:var(--gray);font-weight:600">People who claimed or created a profile · <span id="peopleCount"></span> (all time, newest first)</summary>
+<div class="row" style="margin:10px 0 6px"><input type="search" id="peopleQ" placeholder="filter by name or affiliation" style="min-width:240px"></div>
+<table id="people"></table></details></div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const OPENS=['open_first','open_returning'], SIGN=['first_created','first_claimed'],
+      INTER=['askhobby_added','askbio_edit','search','open_person','open_program','save_contact','save_program','show_more','view_student','view_side','view_everyone','faq','edit'];
+const LABEL={open_first:'first visit',open_returning:'returning visit',lookup_found:'found by name',lookup_suggested:'got suggestions',lookup_none:'not found → new',claimed:'claimed a profile',created:'created a profile (tap; re-claims count again)',edit:'edited profile (tap)',first_claimed:'first-time claim of a programme entry (one per person, ever)',first_created:'first-time new profile (one per person, ever)',profile_edit:'a saved change to a profile after the first claim/creation',draft_bio_ok:'draft bio written',draft_bio_none:'draft bio: no match',search:'searched',open_person:'opened a person',open_program:'opened a program',save_contact:'saved a contact',save_program:'saved a program',show_more:'show more matches',view_everyone:'view: academic',view_student:'view: student',view_side:'view: hobby',faq:'opened FAQ',askhobby_added:'after claim: added a hobby',askhobby_skip:'after claim: skipped hobby',askbio_ok:'after claim: bio looks good',askbio_edit:'after claim: edited bio',placement_failed:'placement failed (final)',placement_timeout:'placement took >3 min'};
+let DATA=null;
+$('tok').value=localStorage.getItem('hfes_dash_token')||sessionStorage.getItem('hfes_dash_token')||'';
+// Buckets are stored in UTC; the charts regroup them in the chosen zone. Default: the browser's zone if listed, else UTC.
+const TZS=[...$('tz').options].map(o=>o.value); const browserTz=Intl.DateTimeFormat().resolvedOptions().timeZone;
+$('tz').value=localStorage.getItem('hfes_dash_tz')||(TZS.includes(browserTz)?browserTz:'UTC');
+$('tz').onchange=()=>{localStorage.setItem('hfes_dash_tz',$('tz').value); if(DATA){LOCAL.clear(); ZOOM=null; render();}};
+const LOCAL=new Map();
+function local(bucket){ // 'YYYY-MM-DDTHH[:MM]' UTC -> {day:'YYYY-MM-DD', hour:'YYYY-MM-DDTHH', min:'YYYY-MM-DDTHH:MM'} in the chosen zone
+  const k=$('tz').value+'|'+bucket; if(LOCAL.has(k)) return LOCAL.get(k);
+  const dt=new Date(bucket.length===13?bucket+':00:00Z':bucket+':00Z');
+  const p=Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:$('tz').value,year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(dt).map(x=>[x.type,x.value]));
+  const v={day:`${p.year}-${p.month}-${p.day}`,hour:`${p.year}-${p.month}-${p.day}T${p.hour}`,min:`${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`}; LOCAL.set(k,v); return v;
+}
+const todayLocal=()=>local(new Date().toISOString().slice(0,16)).day;
+const shiftDay=(day,n)=>{const t=new Date(day+'T12:00:00Z'); t.setUTCDate(t.getUTCDate()+n); return t.toISOString().slice(0,10);};
+$('to').value=todayLocal(); $('from').value=shiftDay(todayLocal(),-3);
+$('go').onclick=load; for(const id of ['from','to']) $(id).onchange=()=>{ if(DATA) load(); }; $('tok').addEventListener('keydown',e=>{if(e.key==='Enter')load();});
+async function load(){
+  const tok=$('tok').value.trim(); if(!tok){$('msg').textContent='Token needed.';return;}
+  localStorage.setItem('hfes_dash_token',tok);  // remembered on this device $('msg').textContent='';
+  if($('from').value>$('to').value){$('msg').textContent='"from" is after "to".';return;}
+  const q=`from=${shiftDay($('from').value,-1)}&to=${shiftDay($('to').value,1)}`;  // a day of padding each side: the zone shifts buckets across midnight
+  let r=await fetch(`/api/stats?${q}`,{headers:{'X-Rebuild-Token':tok},cache:'no-store'}).catch(()=>null);
+  if(!r||r.status===403) r=await fetch(`/api/stats?${q}&token=${encodeURIComponent(tok)}`,{cache:'no-store'}).catch(()=>null); // if the CDN drops the header
+  if(!r||!r.ok){$('msg').textContent=r&&r.status===403?'Wrong token.':'Could not load.';return;}
+  DATA=await r.json(); ZOOM=null; render();
+}
+function sum(rows,kinds){return rows.filter(m=>kinds.includes(m.kind)).reduce((a,m)=>a+m.n,0);}
+let RES=localStorage.getItem('hfes_dash_res')||'hour', CHART=null, ZOOM=null;
+document.querySelectorAll('.res').forEach(bt=>bt.onclick=()=>{RES=bt.dataset.res;localStorage.setItem('hfes_dash_res',RES);drawChart();});
+const KEYS={day:x=>local(x.bucket).day, hour:x=>local(x.bucket).hour, minute:x=>local(x.bucket).min};
+function axis(days){ // every bucket in the range, including empty ones, so gaps are visible
+  if(RES==='day') return days;
+  const out=[]; for(const dd of days) for(let h=0;h<24;h++){const hh=`${dd}T${String(h).padStart(2,'0')}`; if(RES==='hour') out.push(hh); else for(let m=0;m<60;m++) out.push(`${hh}:${String(m).padStart(2,'0')}`);}
+  return out;
+}
+function drawChart(){
+  document.querySelectorAll('.res').forEach(bt=>bt.classList.toggle('on',bt.dataset.res===RES));
+  if(!window.echarts){$('chart').textContent='Chart library did not load (offline?). Totals and tables below still work.';return;}
+  const days=window.RANGE_DAYS, m=window.RANGE_METRICS, cats=axis(days), key=KEYS[RES], by={};
+  m.forEach(x=>{const k=key(x);(by[k]=by[k]||{})[x.kind]=(by[k][x.kind]||0)+x.n;});
+  const series=[['page opens',OPENS,'#137a54'],['signups',SIGN,'#7B61FF'],['interactions',INTER,'#d9731a']].map(([name,kinds,color])=>({
+    name,type:'bar',stack:'t',large:true,itemStyle:{color},data:cats.map(c=>kinds.reduce((a,k)=>a+((by[c]||{})[k]||0),0))}));
+  CHART=CHART||echarts.init($('chart'));
+  CHART.setOption({
+    animation:false, grid:{left:40,right:16,top:28,bottom:64},
+    tooltip:{trigger:'axis',axisPointer:{type:'shadow'},formatter:ps=>{const c=ps[0].axisValue,row=by[c]||{};const tot=Object.entries(row).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${LABEL[k]||k}: <b>${v}</b>`).join('<br>');return `<b>${c.replace('T',' ')}</b><br>${ps.map(p=>`${p.marker}${p.seriesName}: <b>${p.value}</b>`).join('<br>')}${tot?'<hr style="border:0;border-top:1px solid #ddd;margin:4px 0">'+tot:''}`;}},
+    legend:{top:0},
+    xAxis:{type:'category',data:cats,axisLabel:{formatter:v=>RES==='day'?v.slice(5):RES==='hour'?(v.endsWith('T00')?v.slice(5,10):v.slice(11)+'h'):(v.endsWith(':00')?v.slice(5,13).replace('T',' ')+'h':v.slice(14)), hideOverlap:true}},
+    yAxis:{type:'value',minInterval:1},
+    dataZoom:[{type:'inside',...(ZOOM||{})},{type:'slider',height:18,bottom:14,...(ZOOM||{})}],
+    series}, true);
+  CHART.off('datazoom'); CHART.on('datazoom',()=>{const z=CHART.getOption().dataZoom[0];ZOOM={start:z.start,end:z.end};});
+  $('dayLabel').textContent=`${days[0]} → ${days[days.length-1]} (${$('tz').options[$('tz').selectedIndex].text})`;
+}
+window.addEventListener('resize',()=>CHART&&CHART.resize());
+function renderPeople(){
+  const q=($('peopleQ').value||'').trim().toLowerCase();
+  const rows=(DATA.people||[]).filter(p=>!q||(p.name+' '+p.aff).toLowerCase().includes(q));
+  $('peopleCount').textContent=(DATA.people||[]).length;
+  const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const when=iso=>{const l=local(iso.slice(0,16));return l.day+' '+l.min.slice(11);};
+  $('people').innerHTML='<tr><th>joined</th><th>last edit</th><th>name</th><th>affiliation</th><th>type</th><th>student</th><th>hobby</th></tr>'+
+    (rows.map(p=>`<tr><td style="white-space:nowrap">${when(p.when)}</td><td style="white-space:nowrap;color:var(--gray)">${p.edited?when(p.edited)+' ('+p.edits+')':''}</td><td>${esc(p.name)}</td><td>${esc(p.aff)}</td><td>${p.kind}</td><td>${p.student?'yes':''}</td><td>${esc(p.hobby)}</td></tr>`).join('')||'<tr><td colspan="7" style="color:var(--gray)">nobody yet</td></tr>');
+}
+$('peopleQ').addEventListener('input',()=>DATA&&renderPeople());
+function render(){
+  $('out').style.display='block';
+  const m=DATA.metrics.filter(x=>{const dd=local(x.bucket).day; return dd>=$('from').value && dd<=$('to').value;});  // range in the chosen zone
+  const days=[]; for(let dd=$('from').value; dd<=$('to').value; dd=shiftDay(dd,1)) days.push(dd);
+  const today=todayLocal();
+  window.RANGE_DAYS=days;
+  const k=[['page opens',sum(m,OPENS),'Every time the app was opened or reloaded, in the chosen range.'],['first visits',sum(m,['open_first']),'Opens by a browser with no saved profile yet (new device or cleared data).'],['people (first time)',sum(m,SIGN),'Distinct people whose first claim or creation fell in the range, from the edit ledger. Re-claims and edits never count here.'],['profile edits',sum(m,['profile_edit']),'Saved changes to a profile after its first claim/creation: bio, hobbies, name, affiliation.'],['interactions',sum(m,INTER),'Searches, opened people/programs, saves, show-more, view switches, FAQ opens, edits.'],['profiles total',DATA.profilesTotal,'Rows in the database right now (all time, not the range).'],['student profiles',DATA.studentsTotal||0,'Of those, how many ticked “I’m a student” when claiming or creating (all time).']];
+  $('kpis').innerHTML=k.map(([l,v,t])=>`<div class="kpi" title="${t}"><b>${v}</b><span>${l}</span></div>`).join('');
+  window.RANGE_METRICS=m; drawChart();
+  const f=[
+    ['lookups',sum(m,['lookup_found','lookup_suggested','lookup_none']),'Times someone typed a name + affiliation and tapped “Find me”. One person can look up more than once.'],
+    ['found directly',sum(m,['lookup_found']),'The typed name and affiliation matched exactly one attendee → straight to the “Is this you?” screen.'],
+    ['via suggestions',sum(m,['lookup_suggested']),'No exact match, but the name rules found likely candidates (typo, nickname, middle name, same surname + affiliation) → they pick from a list.'],
+    ['not found',sum(m,['lookup_none']),'Nobody plausible in the programme → routed to “create a new profile”. Also fires when someone decides the suggestions aren’t them.'],
+    ['draft written',sum(m,['draft_bio_ok']),'For a new profile, Haiku searched the web, was confident it found the person, and pre-filled a bio for them to edit.'],
+    ['draft: no match',sum(m,['draft_bio_none']),'Haiku searched but would not guess (no public page, ambiguous name, or an API error/timeout) → empty box with the placeholder text.'],
+    ['claimed (first time)',sum(m,['first_claimed']),'A programme entry claimed for the first time ever. Counted from the edit ledger, so a reset-and-re-claim is not counted again.'],
+    ['created (first time)',sum(m,['first_created']),'A brand-new profile (not in the programme) created for the first time. Gets a new dot on the map.'],
+    ['claimed + created',sum(m,['first_claimed','first_created']),'Unique people who joined in the range: first-time claims plus first-time new profiles.'],
+    ['profile edits',sum(m,['profile_edit']),'Later saved changes to any profile: bio, hobbies, name, affiliation, student flag.']];
+  $('funnel').innerHTML=f.map(([l,v,t])=>`<div title="${t.replace(/"/g,'&quot;')}"><b>${v}</b><span>${l}</span></div>`).join('')
+    +`<details style="flex-basis:100%;margin-top:6px"><summary style="cursor:pointer;font-size:12.5px;color:var(--gray)">What each step means</summary><ul style="margin:6px 0 0;padding-left:18px;font-size:13px;color:#333">${f.map(([l,,t])=>`<li><b>${l}</b> — ${t}</li>`).join('')}</ul>
+    <p style="font-size:12.5px;color:var(--gray);margin:6px 0 0">Reading it: lookups = found directly + via suggestions + not found. Found/suggested usually end in <b>claimed</b>; not found ends in a draft attempt (<b>written</b> or <b>no match</b>) and then <b>created</b>. Gaps are people who stopped before confirming.</p></details>`;
+  const tot={};m.forEach(x=>tot[x.kind]=(tot[x.kind]||0)+x.n);
+  $('kinds').innerHTML='<tr><th>kind</th><th>what it counts</th><th style="text-align:right">n</th></tr>'+Object.entries(tot).sort((a,b)=>b[1]-a[1]).map(([kk,v])=>`<tr><td><code>${kk}</code></td><td>${LABEL[kk]||''}</td><td class="n">${v}</td></tr>`).join('');
+  renderPeople();
+  const j={};DATA.jobs.forEach(x=>{const dd=local(x.hour).day; if(dd>=$('from').value&&dd<=$('to').value) j[x.status]=(j[x.status]||0)+x.n;});
+  $('jobs').innerHTML='<tr><th>status</th><th style="text-align:right">jobs</th></tr>'+Object.entries(j).map(([st,v])=>`<tr><td>${st}</td><td class="n">${v}</td></tr>`).join('')||'<tr><td>none</td></tr>';
+}
+</script></main></body></html>

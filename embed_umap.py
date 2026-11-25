@@ -1,41 +1,10 @@
 #!/usr/bin/env python3
-"""
-Embed HFES attendee profiles, project them to 2D for the UMAP scatter, and
-precompute each person's top-5 most similar attendees ("top matches").
+"""Embed attendee bios, project them to 2D with UMAP, and bake each person's top matches.
 
-There are two independent embedding SPACES, each with its own files:
-  main  Everyone's academic bio (s_profile / Interest Profile) — umap_positions.json etc.
-  side  Optional non-academic "side interests" text (hobbies, quirky stuff) — only people
-        who actually filled this in get embedded/placed — side_umap_positions.json etc.
-Both spaces go through the same full/incremental machinery below, parametrized by a
-Space namedtuple, rather than two copies of this file.
-
-Two modes:
-  full         Re-embed everyone from authors.csv, refit UMAP, and
-               recompute top-matches for everyone from scratch — overwrites
-               umap_positions.json (and side_umap_positions.json, for whoever has
-               side-interest text). A full UMAP refit can shift everyone's
-               position, not just the person who changed, so server.py no
-               longer triggers this automatically — it's a deliberate,
-               manual/admin action (POST /api/admin/rebuild, or this command).
-  incremental  Embed one or more new/edited profiles, project each into the
-               existing (already-fitted) UMAP space via .transform(), and
-               compute each one's OWN top-5 matches against the existing
-               embedding matrix — cheap, does not move anyone else's dot, and
-               does not update anyone else's top-matches list (that needs the
-               next `full` run). --batch reads a whole JSON list from stdin and
-               places them all with one model load (see server.py's worker) —
-               use that for more than a couple of profiles at once; the
-               model-load cost is paid once per process, not once per profile.
-               The side space is placed too, for whoever in the batch has
-               non-blank side-interest text — silently skipped per-person
-               otherwise, and skipped entirely (not an error) if the side space
-               hasn't been fitted yet (nobody's opted in at the last `full` run).
-
-Output (umap_positions.json) is plain static JSON — a static HTML/JS page can
-read it directly with zero server and zero runtime embedding math. The only
-thing that genuinely requires re-running this script (not doable in pure
-client-side JS) is generating a NEW embedding for changed text.
+Two spaces, each with its own files: main (academic bio, umap_positions.json) and side
+(opt-in side-interest text, side_umap_positions.json). `full` refits everything and can move
+every dot, so it is a deliberate action. `incremental` transforms new/edited profiles into the
+fitted space without moving anyone else (their own matches are updated; others' wait for `full`).
 
 Usage:
   python3 embed_umap.py full
@@ -46,6 +15,7 @@ Usage:
 import argparse
 import csv
 import io
+import re
 import json
 import os
 import re
@@ -59,9 +29,7 @@ import numpy as np
 
 MODEL_NAME = "all-MiniLM-L6-v2"
 TOP_K = 20
-# A UMAP fit needs at least a couple of points to mean anything; below this the side space
-# just isn't fitted yet — ponytail: hardcoded floor, not tuned, raise it if a 2-3 person fit
-# ever looks too noisy in practice.
+# Floor for fitting the side space; UMAP needs more than a couple of points.
 MIN_SPACE_PEOPLE = 2
 DATA_DIR = Path(__file__).parent
 CSV_PATH = DATA_DIR / "authors.csv"
@@ -70,23 +38,20 @@ EMBEDDINGS_PATH = DATA_DIR / "embeddings.npy"
 IDS_PATH = DATA_DIR / "embeddings_person_ids.json"
 REDUCER_PATH = DATA_DIR / "umap_reducer.joblib"
 SIDE_POSITIONS_PATH = DATA_DIR / "side_umap_positions.json"
+HOBBY_SIM_PATH = DATA_DIR / "hobby_sim.json"  # per-term hobby similarities for the Hobby view's soft matching
 SIDE_EMBEDDINGS_PATH = DATA_DIR / "side_embeddings.npy"
 SIDE_IDS_PATH = DATA_DIR / "side_embeddings_person_ids.json"
 SIDE_REDUCER_PATH = DATA_DIR / "side_umap_reducer.joblib"
 # Written by chi_feed.py: {person_id: [displayed_bio, titles+abstracts]}. Server-side only.
 EMBED_TEXT_PATH = DATA_DIR / "embed_text.json"
-# Same default/override as server.py's STATE, so a subprocess launched by the
-# server (which passes HFES_STATE_DIR through its inherited environment) finds
-# the same database.
+# Same default/override as server.py's STATE, so a subprocess shares the database.
 STATE_DIR = Path(os.environ.get("HFES_STATE_DIR", DATA_DIR / "state"))
 # Same libpq connection string as server.py (inherited by subprocesses via the environment).
 DATABASE_URL = os.environ.get("HFES_DATABASE_URL", "dbname=hfes")
 
 
 def _publish(tmp_path, final_path: Path) -> None:
-    """os.replace() carries the temp file's mode, not the target's — tempfile
-    defaults to 0600, which would silently 403 Nginx on every rebuild (this
-    already broke the site once). Force the public-static 0644 every time."""
+    """tempfile creates 0600; nginx needs 0644 on the published files."""
     os.chmod(tmp_path, 0o644)
     os.replace(tmp_path, final_path)
 
@@ -106,15 +71,8 @@ def load_profile_rows() -> list[tuple]:
 
 
 def materialize_db_edits(edits: list[tuple] | None = None) -> int:
-    """Fold explicit profile edits/new signups out of Postgres into the source CSV.
-
-    server.py stores profile edits only in the database. Without this step, `full`
-    would keep re-embedding the stale CSV and silently ignore every edit. The
-    CSV stays the single source both this script and the frontend's fetch()
-    read, so a materialized edit becomes visible everywhere in one full run.
-    An unreachable database raises (the job fails and alerts) rather than silently
-    skipping every edit.
-    """
+    """Fold profile edits/new signups from Postgres into the CSV so `full` embeds them.
+    An unreachable database raises; edits must never be skipped silently."""
     if edits is None:
         edits = load_profile_rows()
     if not edits:
@@ -142,17 +100,11 @@ def materialize_db_edits(edits: list[tuple] | None = None) -> int:
             by_person_id[key] = row
         row["Author"] = name
         row["Affiliation"] = affiliation
-        # s_profile is the canonical bio field now (see bio_text() above) — a self-typed edit
-        # has no "**Headline**" line, and that's fine, renderBio() just shows it as plain text.
         row["s_profile"] = bio
-        # Internal-only tag (not surfaced anywhere in the UI as a label) driving the frontend's
-        # Student View filter; "1"/"" rather than True/False since this round-trips through CSV text.
+        # "1"/"" because this round-trips through CSV text.
         row["Is Student"] = "1" if is_student else ""
-        # Optional non-academic "side interests" text (hobbies etc.) — the second, separate
-        # embedding space below. Blank is the common case; blank means "not embedded there".
         row["Side Interest"] = side_interest or ""
-        # Any DB profile row means a real person claimed/created this profile, i.e. is attending —
-        # index.html shows a small circle after the name (see the FAQ entry about it).
+        # Any DB row means the person claimed the profile, so they're attending (circle after the name).
         row["Claimed"] = "1"
 
     sio = io.StringIO()
@@ -173,11 +125,9 @@ _feed_cache = (None, {})
 
 
 def feed_text(person_id, text: str) -> str:
-    """A CHI feed person's displayed bio is only their paper titles (abstracts would bloat the
-    CSV every browser downloads), so embed titles + abstracts instead — but only while the text
-    is still that feed bio. Claiming a profile re-posts the displayed bio unchanged, which must
-    not degrade the embedding; a bio the person wrote themselves is embedded as written.
-    Re-read when the file changes: the warm worker outlives many feed syncs."""
+    """Feed people's displayed bio is only their titles; embed titles + abstracts instead, but only while
+    the text still equals the feed bio (a claim re-posts it unchanged; a self-written bio is embedded as
+    written). Re-read when the file changes: the warm worker outlives many feed syncs."""
     global _feed_cache
     try:
         mtime = EMBED_TEXT_PATH.stat().st_mtime
@@ -191,30 +141,18 @@ def feed_text(person_id, text: str) -> str:
 
 
 def bio_text(row) -> str:
-    """The canonical bio: s_profile (curated "**Headline**\\nBody" text — see index.html's
-    renderBio(), which turns ** into real bold) if present, else the older Interest Profile
-    column, else presentation titles as a last resort. ** is stripped here since it's markdown
-    noise for the embedding model, not for display (display keeps it, in index.html)."""
+    """s_profile, else Interest Profile, else titles. ** is markdown for display, noise for the model."""
     text = ((row.get("s_profile") or "").strip() or (row.get("Interest Profile") or "").strip()
             or (row.get("Presentation Titles") or "").strip())
     return feed_text(row.get("Person ID"), text).replace("**", "")
 
 
 def side_text(row) -> str:
-    """The optional non-academic 'side interests' text. Blank for most people — those rows
-    are filtered out of the side space entirely by read_profiles(), not embedded at all."""
+    """Optional side-interest text; blank rows are left out of the side space."""
     return (row.get("Side Interest") or "").strip()
 
 
-# A Space bundles everything that differs between the two embedding spaces: where its files
-# live, and how to pull its text out of a CSV row. full/incremental below loop over both
-# spaces instead of two copies of this module.
-# `required`: MAIN must succeed for a full/incremental run to be considered successful at all —
-# a failure there really does mean the job failed. SIDE is best-effort: a UMAP fit can fail in
-# ways unrelated to real bugs at very small N (e.g. the spectral-init eigensolver used by UMAP's
-# default init needs a minimum number of points beyond just "more than 1" — confirmed locally: 3
-# points raised inside umap/scipy, unrelated to anything in this file), and it's expected to grow
-# from zero as people opt in — that must never fail a rebuild that otherwise succeeded for everyone.
+# MAIN must succeed; SIDE is best-effort (UMAP can fail at very small N, and the space grows from zero).
 Space = namedtuple("Space", "name positions_path embeddings_path ids_path reducer_path text_fn required")
 MAIN_SPACE = Space("main", POSITIONS_PATH, EMBEDDINGS_PATH, IDS_PATH, REDUCER_PATH, bio_text, True)
 SIDE_SPACE = Space("side interest", SIDE_POSITIONS_PATH, SIDE_EMBEDDINGS_PATH, SIDE_IDS_PATH, SIDE_REDUCER_PATH, side_text, False)
@@ -231,12 +169,8 @@ def read_profiles(space: Space = MAIN_SPACE):
 
 
 def coauthor_index(rows) -> dict[str, set[str]]:
-    """Two people co-authored if any presentation (title + date, from their Schedule Detail
-    entries) appears in both their schedules with an authorship role. Session Chair doesn't
-    count, since chairing isn't co-authoring. Drops co-authors from ACADEMIC top matches only:
-    they share paper text, so they'd fill the top of everyone's list, and "go meet your own
-    labmate" is noise. Hobby matches keep them. Shared by server.py (live /api/matches) and the
-    baked top_matches below; index.html builds the same index client-side, keep them in sync."""
+    """People sharing a presentation (authorship roles only, not chairing). Dropped from academic top
+    matches: they share paper text and would fill everyone's list. server.py and index.html mirror this."""
     title_people: dict[str, set[str]] = {}
     for r in rows:
         if not (r.get("Author") and r.get("Person ID")):
@@ -249,8 +183,7 @@ def coauthor_index(rows) -> dict[str, set[str]]:
             title = (part[:role.start()] if role else part).rsplit("·", 1)[-1].strip().lower()
             key = f"{title}|{part.split(' ', 1)[0]}"  # date prefix disambiguates generic titles
             title_people.setdefault(key, set()).add(r["Person ID"])
-        # Papers in no scheduled session (773 people in chi2026) leave Schedule Detail empty;
-        # group those by title alone. ponytail: two unscheduled papers with the same title would merge.
+        # Unscheduled papers have no Schedule Detail; group those by title alone (same-title papers would merge).
         if not (r.get("Schedule Detail") or "").strip():
             for title in (r.get("Presentation Titles") or "").split("; "):
                 if title.strip():
@@ -283,23 +216,17 @@ def top_matches_for(i, embeddings, profiles, exclude=frozenset()):
 
 
 def write_positions(space: Space, people, generated_at):
-    # Atomic: Nginx serves this file directly to browsers, and server.py's
-    # Catalogue reads it too, both concurrently with this write.
+    # Atomic: nginx and server.py read this file while it's being written.
     _atomic_write_text(space.positions_path, json.dumps({
         "model": MODEL_NAME,
-        "generated_at": generated_at,  # timestamp of the last FULL refit
+        "generated_at": generated_at,  # time of the last change to this file (full refit OR incremental placement)
         "people": people,              # each entry also carries its own updated_at
     }, indent=2))
 
 
 def verify_placed(space: Space, person_ids_expected):
-    """Defense-in-depth: re-read the just-written files from disk and confirm every person we
-    meant to place is actually there, rather than trusting that "no exception was raised" means it
-    worked. A real signup once had its rebuild job report "complete" while the profile never
-    actually appeared in the public data — nobody, including the person who signed up, was ever
-    told. This turns that class of silent failure into an explicit, alertable job failure instead.
-    Raises RuntimeError (caught by server.py's worker, which marks the job "failed" with this
-    message) rather than returning a bool, so a caller can't accidentally ignore the result."""
+    """Re-read the written files and confirm every expected person is there. Raises RuntimeError so
+    the job is marked failed instead of silently reporting success."""
     with open(CSV_PATH, encoding="utf-8-sig") as f:
         csv_ids = {row.get("Person ID") for row in csv.DictReader(f)}
     positions_ids = (
@@ -317,17 +244,12 @@ def verify_placed(space: Space, person_ids_expected):
 
 
 def run_full(spaces=(MAIN_SPACE, SIDE_SPACE), model=None):
-    """`spaces` lets a caller restrict the refit to just one space — used for the side-only
-    periodic refit (see server.py's periodic_side_refit()): the side space is small and grows
-    slowly, so its map benefits from an occasional full refit as more people opt in, but the
-    academic space (dense, ~1,650 people from day one, frozen by design) has no reason to move
-    on the same cadence — restricting to side-only here is what keeps that map untouched."""
+    """`spaces` restricts the refit: the periodic side-only refit must not move the frozen academic map."""
     import umap
     import joblib
 
     materialize_db_edits()
-    # `model` is passed in by the warm worker (see run_worker) so a refit reuses the already-loaded
-    # model instead of holding two copies; the cold CLI path still loads it lazily below.
+    # `model` comes from the warm worker so a refit reuses the loaded model.
     for space in spaces:
         profiles = read_profiles(space)
         if len(profiles) < MIN_SPACE_PEOPLE:
@@ -339,10 +261,8 @@ def run_full(spaces=(MAIN_SPACE, SIDE_SPACE), model=None):
         if model is None:
             model = load_model()
         try:
-            # Co-authors of a single paper share exactly the same text (~56% of CHI people), so
-            # embed and fit each distinct text once and hand everyone sharing it the same row and
-            # dot. Same result, ~2.3x less encode/UMAP work, and UMAP isn't fed thousands of
-            # exact duplicates. index.html nudges stacked dots apart when drawing.
+            # Co-authors of one paper share the same text (~56% of people): embed each distinct text once.
+            # index.html nudges the stacked dots apart.
             texts = [p["text"] for p in profiles]
             uniq = list(dict.fromkeys(texts))
             row_of = {t: k for k, t in enumerate(uniq)}
@@ -378,9 +298,10 @@ def run_full(spaces=(MAIN_SPACE, SIDE_SPACE), model=None):
         except Exception as exc:
             if space.required:
                 raise
-            # Best-effort space (the side space): log and move on rather than failing a rebuild
-            # that otherwise succeeded for everyone's main profile — see the Space definition above.
+            # Side space is best-effort: log and keep the main result.
             print(f"Skipping the {space.name} space this run — fit failed, will retry next full run: {exc}", file=sys.stderr)
+    if model is not None:
+        write_hobby_sim(model)
 
 
 def rank_candidates(all_embeddings, all_ids, person_id, embedding, top_k, exclude=frozenset()):
@@ -392,8 +313,7 @@ def rank_candidates(all_embeddings, all_ids, person_id, embedding, top_k, exclud
 
 
 def upsert_embedding(all_embeddings, all_ids, person_id, embedding):
-    """Replace person_id's row if present, else append. Never touches anyone else's row —
-    this is what lets incremental grow the match candidate pool without a UMAP refit."""
+    """Replace person_id's row if present, else append; never touches other rows."""
     if person_id in all_ids:
         all_embeddings = all_embeddings.copy()
         all_embeddings[all_ids.index(person_id)] = embedding
@@ -401,13 +321,70 @@ def upsert_embedding(all_embeddings, all_ids, person_id, embedding):
     return np.vstack([all_embeddings, embedding]), all_ids + [person_id]
 
 
+
+# ---- Hobby term similarity (soft matching in the Hobby view) -------------------------------
+# index.html's parseHobbies() ported 1:1 — the keys here must equal the keys the browser derives,
+# or a person's hobby won't find its row in hobby_sim.json and silently falls back to exact match.
+_HOBBY_SPLIT = re.compile(r"[,;\n/]|\band\b|&")
+HOBBY_SIM_MIN = 0.35  # pairs below this aren't worth shipping; the browser's credit curve (HOBBY_FLOOR) is 0 there anyway
+
+
+def parse_hobbies(text: str) -> list[str]:
+    out = []
+    for t in _HOBBY_SPLIT.split((text or "").lower()):
+        t = re.sub(r"\s+", " ", re.sub(r"[.!]+$", "", t)).strip()
+        if not t or len(t) > 40:
+            continue
+        if len(t) > 4 and re.search(r"[^s]s$", t) and not re.search(r"(ss|us|is)$", t):
+            t = t[:-1]  # plain plurals → singular
+        if t not in out:
+            out.append(t)
+    return out
+
+
+def hobby_terms_from_csv(path: Path = None) -> list[str]:
+    with open(path or CSV_PATH, newline="", encoding="utf-8") as f:
+        terms = []
+        for row in csv.DictReader(f):
+            for t in parse_hobbies(row.get("Side Interest") or ""):
+                if t not in terms:
+                    terms.append(t)
+    return sorted(terms)
+
+
+def hobby_sim_payload(terms: list[str], model) -> dict:
+    """{terms, pairs:[[i, j, sim], ...]} with i<j and sim >= HOBBY_SIM_MIN. A few hundred terms at
+    most, so this is one small encode; stored sparse so the browser download stays a few KB."""
+    pairs = []
+    if len(terms) >= 2:
+        emb = model.encode(terms, normalize_embeddings=True)
+        sims = emb @ emb.T
+        for i in range(len(terms)):
+            for j in range(i + 1, len(terms)):
+                s = float(sims[i, j])
+                if s >= HOBBY_SIM_MIN:
+                    pairs.append([i, j, round(s, 3)])
+    return {"generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "terms": terms, "pairs": pairs}
+
+
+def write_hobby_sim(model) -> int:
+    """Embed every distinct hobby term in the CSV and publish hobby_sim.json. Called after every
+    placement that carried hobby text and after every full run. Never fatal: the Hobby view
+    works exact-match-only without the file."""
+    try:
+        terms = hobby_terms_from_csv()
+        payload = hobby_sim_payload(terms, model)
+        _atomic_write_text(HOBBY_SIM_PATH, json.dumps(payload, ensure_ascii=False))
+        print(f"Wrote {HOBBY_SIM_PATH.name}: {len(terms)} hobby term(s), {len(payload['pairs'])} pair(s) >= {HOBBY_SIM_MIN}.", file=sys.stderr)
+        return len(terms)
+    except Exception as e:  # noqa: BLE001 — best-effort by design, same stance as the side space
+        print(f"hobby_sim: skipped ({e})", file=sys.stderr)
+        return -1
+
+
 def _place_batch_in_space(space: Space, items, model):
-    """Shared body for placing one or more {person_id,name,text} items into `space` via
-    .transform() into its already-fitted UMAP — never refits, never moves anyone else's dot.
-    space.required=True (the main space) exits the whole process if the space isn't fitted yet,
-    since that's a real setup problem, and propagates any placement failure. required=False (the
-    side space) just skips quietly on either — it's normal for the side space to not be fitted
-    yet early on, and a rare placement hiccup there shouldn't fail an otherwise-fine main placement."""
+    """Place items into `space` via .transform() on the fitted UMAP: never refits, never moves others.
+    A required space exits on a missing fit and propagates failures; the side space skips quietly."""
     if not items:
         return
     if not (space.reducer_path.exists() and space.embeddings_path.exists() and space.ids_path.exists()):
@@ -436,8 +413,7 @@ def _place_batch_in_space(space: Space, items, model):
         coauthors = read_coauthors() if space is MAIN_SPACE else {}
         for profile, embedding, (x, y) in zip(items, embeddings, coords):
             person_id = profile["person_id"]
-            # Batch-mates already placed earlier in this same loop are visible here too (they're
-            # already folded into all_embeddings/all_ids), so people signing up together can match.
+            # Batch-mates placed earlier in this loop are already candidates.
             ranked = rank_candidates(all_embeddings, all_ids, person_id, embedding, TOP_K,
                                      coauthors.get(person_id, frozenset()))
             top_matches = [{"person_id": pid, "name": name_by_id.get(pid, "?"), "score": round(score * 100)} for pid, score in ranked]
@@ -448,15 +424,15 @@ def _place_batch_in_space(space: Space, items, model):
             print(f"Placed {profile['name']} at ({x:.2f}, {y:.2f}) in the {space.name} space with "
                   f"{len(top_matches)} top matches, without moving anyone else.", file=sys.stderr)
 
-        # Fold everyone into the growing embedding matrix (replace if an edit, append if new) so
-        # future incremental runs — and server.py's live /api/matches — can see them as a match
-        # candidate too, without ever refitting UMAP or moving anyone else's dot.
+        # Grow the embedding matrix so later placements and /api/matches see them, without a refit.
         embeddings_tmp = space.embeddings_path.with_name(space.embeddings_path.stem + ".tmp.npy")
         with open(embeddings_tmp, "wb") as f:
             np.save(f, all_embeddings)
         _publish(embeddings_tmp, space.embeddings_path)
         _atomic_write_text(space.ids_path, json.dumps(all_ids))
-        write_positions(space, list(people_by_id.values()), positions.get("generated_at"))
+        # Stamp with now, not the previous value: the browser's "last updated" label and the "a newer
+        # map is ready" nudge both read this, and a new person on the map IS a change (owner's call 2026-10-16).
+        write_positions(space, list(people_by_id.values()), now)
         verify_placed(space, [p["person_id"] for p in items])
     except Exception as exc:
         if space.required:
@@ -465,20 +441,12 @@ def _place_batch_in_space(space: Space, items, model):
 
 
 def run_incremental_batch(profiles, model=None):
-    """Place one or more new/edited profiles in a SINGLE process: one model load, one
-    batch encode per space, one write per space — instead of paying the ~1-3s model-load
-    cost per profile. This is what makes a burst of signups (e.g. right after a session
-    break) cheap: N profiles cost one model load + N tiny encodes, not N model loads.
-
-    profiles: list of {"person_id", "name", "text", "side_text"} dicts ("side_text" is
-    optional and usually blank). A person_id appearing twice in the same batch is fine —
-    the later entry simply wins (matches upsert_embedding).
-    """
+    """Place one or more profiles in one process: one model load, one encode and one write per space.
+    profiles: [{"person_id","name","text","side_text"?}]; for a duplicate person_id the later entry wins."""
     if not profiles:
         return
 
-    # Bring the CSV in sync with these (and any other pending) SQLite edits so everyone
-    # shows up in server.py's Catalogue right away, without a UMAP refit.
+    # Sync the CSV with pending DB edits so everyone appears in the Catalogue right away.
     materialize_db_edits()
 
     if model is None:
@@ -491,19 +459,15 @@ def run_incremental_batch(profiles, model=None):
     side_items = [{"person_id": p["person_id"], "name": p["name"], "text": p["side_text"]}
                   for p in profiles if p.get("side_text", "").strip()]
     _place_batch_in_space(SIDE_SPACE, side_items, model)
+    if side_items:
+        write_hobby_sim(model)
 
 
 def run_worker(socket_path: str):
-    """Long-lived WARM worker: load the sentence model once, JIT-compile UMAP's transform once, then
-    serve jobs over a Unix socket forever. Measured on the production t3.small, a cold `incremental`
-    subprocess spends ~20 s of its ~30 s on `import umap` (11 s) + numba JIT of the first transform
-    (8 s) + model load, and ~20 ms on the actual work — this process pays that start-up once, so a
-    placement takes about a second end to end and a burst of signups clears in seconds, not minutes.
-    Protocol: one newline-terminated JSON request per connection, {"kind": "incremental"|"side_only"|
-    "full", "items": [...]} → one newline-terminated {"ok": true} or {"ok": false, "error": "..."}.
-    server.py (`_run_via_worker`) is the only client; it falls back to the cold subprocess whenever
-    this socket is missing or dies mid-job, so this process is an accelerator, never a single point
-    of failure. Runs as the `hfes-match-worker` systemd unit (deploy/hfes-match-worker.service)."""
+    """Warm worker: load the model and JIT UMAP once, then serve jobs over a Unix socket.
+    Protocol: one newline-terminated JSON request per connection,
+    {"kind": "incremental"|"side_only"|"full", "items": [...]} -> {"ok": true} | {"ok": false, "error": "..."}.
+    server.py falls back to a cold subprocess when the socket is down."""
     import socket
     import traceback
     import joblib
@@ -611,8 +575,7 @@ def selftest():
         ranked = rank_candidates(embs2, ids2, "B", np.array([0.0, 1.0]), top_k=5)
         assert [pid for pid, _ in ranked] == ["C", "A"], "person_id must not match against their own row, and must rank by similarity"
 
-        # bio_text: prefers s_profile (stripped of ** for the embedding text) over Interest
-        # Profile, falls back through the chain when fields are blank
+        # bio_text: s_profile (** stripped) over Interest Profile, then the fallback chain
         assert bio_text({"s_profile": "**Headline**\nBody", "Interest Profile": "old", "Presentation Titles": ""}) == "Headline\nBody"
         assert bio_text({"s_profile": "", "Interest Profile": "old bio", "Presentation Titles": ""}) == "old bio"
         assert bio_text({"s_profile": "", "Interest Profile": "", "Presentation Titles": "A Talk"}) == "A Talk"
@@ -622,8 +585,7 @@ def selftest():
         assert side_text({"Side Interest": "  "}) == ""
         assert side_text({}) == ""
 
-        # read_profiles(SIDE_SPACE) must skip anyone with no side-interest text, unlike the
-        # main space (which nearly always has SOME bio_text fallback)
+        # read_profiles(SIDE_SPACE) skips anyone with no side text
         with open(CSV_PATH, encoding="utf-8-sig", newline="") as f:
             all_rows = list(csv.DictReader(f))
         assert len(all_rows) == 2, "sanity: two rows on file"
@@ -632,10 +594,7 @@ def selftest():
         main_profiles = read_profiles(MAIN_SPACE)
         assert {p["person_id"] for p in main_profiles} == {"P1", "freshtok"}, "everyone with a bio (nearly everyone) stays in the main space"
 
-        # verify_placed: catches exactly the silent-failure class seen in production (a rebuild
-        # job reporting "complete" even though the placed profile never made it into the public
-        # files) by re-reading both files from disk rather than trusting in-memory bookkeeping.
-        # Now takes an explicit `space`, since the same check runs for both spaces.
+        # verify_placed re-reads both files from disk rather than trusting in-memory bookkeeping
         test_space = Space("test", tmp / "umap_positions.json", tmp / "x.npy", tmp / "x.json", tmp / "x.joblib", bio_text, True)
         test_space.positions_path.write_text(json.dumps({"people": [{"person_id": "P1", "name": "New Name"}]}))
         verify_placed(test_space, ["P1"])  # present in both CSV (row P1 above) and positions.json — no raise
@@ -645,8 +604,7 @@ def selftest():
         except RuntimeError as exc:
             assert "ghost-id" in str(exc), f"error should name the missing id, got: {exc}"
 
-        # verify_placed against a space whose positions file doesn't exist yet at all (the side
-        # space, before its first successful full run) must raise rather than crash on a missing file.
+        # verify_placed on a space with no positions file yet must raise, not crash
         never_fitted_space = Space("never fitted", tmp / "nope.json", tmp / "x2.npy", tmp / "x2.json", tmp / "x2.joblib", bio_text, True)
         try:
             verify_placed(never_fitted_space, ["P1"])
@@ -677,12 +635,15 @@ if __name__ == "__main__":
         help="Read a JSON array of {person_id,name,text,side_text} objects from stdin and place "
              "them all in one model load, instead of a single profile from --person-id/--name/--text")
     sub.add_parser("selftest", help="Assert-based check of the DB-to-CSV materialize step (no model load)")
+    sub.add_parser("hobby-sim", help="Re-embed the distinct hobby terms in the CSV and write hobby_sim.json (one model load)")
     wk = sub.add_parser("worker", help="Long-lived warm worker: model + UMAP loaded once, jobs served over a Unix socket (see run_worker)")
     wk.add_argument("--socket", default=str(DATA_DIR / "state" / "worker.sock"))
     args = parser.parse_args()
 
     if args.mode == "full":
         run_full(spaces=(SIDE_SPACE,) if args.side_only else (MAIN_SPACE, SIDE_SPACE))
+    elif args.mode == "hobby-sim":
+        write_hobby_sim(load_model())
     elif args.mode == "selftest":
         selftest()
     elif args.mode == "worker":

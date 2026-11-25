@@ -4,6 +4,16 @@ Status as of 2026-09-28. `[x]` done, `[ ]` open, `[?]` needs a decision first.
 CHI 2027: May 10–14, Pittsburgh. The chi2027 feed goes live in **April 2027**; until then, build against `chi2026`.
 
 ## Session log
+**2026-11-25**
+- Pushed to GitHub (private for now): https://github.com/vianneyrenata/chi-peapod. README in the owner's voice
+  with the AI-assistance disclaimer; comments trimmed across the Python files and `index.html`.
+- **Ported hfe-peapod `7d50a75`→`dcab610`** (see CLAUDE.md "Sync"): metrics dashboard, anonymised nginx log,
+  retrying placements + failure email/banner, healthcheck cron, Hobby word cloud + `hobby_sim.json`, after-claim
+  questions, no placeholder bio, past-session greying, cancelled greying driven by the feed's `CANCELLED:` prefix.
+  Deleted `loadtest.py` / `locustfile.py` (k6 stays). Audit decisions: Hobby space, alert email, worker fallback,
+  rebuild endpoints, env knobs, CSV columns all kept for parity with hfe-peapod.
+- New env on the server: `HFES_DASHBOARD_TOKEN` (dashboard password), SMTP vars for the alert email (needed).
+
 **2026-11-03**
 - Ran `chi_feed.py` on the **sandbox** edition (revision 2, CHI 2025 data + seeded edge cases).
   Fixed in `chi_feed.py`, with `test_chi_feed.py` as the check: explicit `null` for `authors` /

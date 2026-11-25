@@ -1,6 +1,7 @@
 __pycache__/
 state/
 .venv/
+*.pem
 *.pdf
 ec2-backup-*/
 # Generated from the CHI programme feed by chi_feed.py (CC BY-NC-SA 4.0 data) or by embed_umap.py —

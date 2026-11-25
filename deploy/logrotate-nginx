@@ -1,0 +1,26 @@
+# Installed by deploy/bootstrap-server.sh over Ubuntu's default (14 days of everything).
+# access.log: anonymised addresses (see nginx.conf) and only kept for the morning-after look.
+/var/log/nginx/access.log {
+	daily
+	missingok
+	rotate 1
+	notifempty
+	create 0640 www-data adm
+	sharedscripts
+	postrotate
+		invoke-rc.d nginx rotate >/dev/null 2>&1
+	endscript
+}
+/var/log/nginx/error.log {
+	daily
+	missingok
+	rotate 7
+	compress
+	delaycompress
+	notifempty
+	create 0640 www-data adm
+	sharedscripts
+	postrotate
+		invoke-rc.d nginx rotate >/dev/null 2>&1
+	endscript
+}

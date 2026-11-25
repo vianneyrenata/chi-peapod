@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
-"""Assert-based check of the rebuild queue/recovery logic in server.py.
-
-Runs against a throwaway state dir/DB — no HTTP server, no model, no network.
-"""
+"""Selftest for server.py: rebuild queue, recovery, rate limits, draft_bio parsing.
+Throwaway state dir and database; no HTTP server, model, or network."""
 import io
 import json
 import os
@@ -17,7 +15,7 @@ import psycopg
 
 STATE_DIR = tempfile.mkdtemp()
 os.environ["HFES_STATE_DIR"] = STATE_DIR
-# A throwaway database per run (needs a Postgres role with CREATEDB; peer auth locally).
+# Throwaway database per run (needs a role with CREATEDB).
 TEST_DB = f"hfes_selftest_{os.getpid()}"
 with psycopg.connect("dbname=postgres", autocommit=True) as _admin:
     _admin.execute(f'CREATE DATABASE "{TEST_DB}"')
@@ -70,10 +68,7 @@ def test_queue_while_running_gets_followup_job():
 
 
 def test_legacy_plain_string_detail_does_not_crash():
-    """A job queued by a pre-upgrade process has detail as a plain reason string
-    ("profile changed"), not the JSON pending-list this version writes. Coalescing into
-    it, or a worker reading it, must not crash on json.loads — see _merge_pending and
-    start_rebuild's worker."""
+    """Older jobs stored detail as a plain string, not JSON; it must not crash the worker."""
     with server.STORE.tx() as db:
         db.execute("DELETE FROM jobs")
         db.execute(
@@ -157,7 +152,7 @@ def test_profile_write_limit_is_sliding_window():
     t0 = 1000.0
     for i in range(server.PROFILE_WRITES_PER_WINDOW):
         assert server.profile_write_allowed("9.9.9.9", t0 + i), f"write {i+1} within the cap must be allowed"
-    assert not server.profile_write_allowed("9.9.9.9", t0 + 30), "the 21st write inside the window is refused"
+    assert not server.profile_write_allowed("9.9.9.9", t0 + 30), "the write past the cap inside the window is refused"
     assert server.profile_write_allowed("8.8.8.8", t0 + 30), "another IP has its own bucket"
     assert server.profile_write_allowed("9.9.9.9", t0 + server.PROFILE_WINDOW_SECONDS + 1), "once the oldest writes age out, allowed again"
 
@@ -174,8 +169,7 @@ def test_match_page_student_only_filters():
 
 
 def test_match_page_side_space_empty_before_first_fit():
-    # The side space's files don't exist until enough people have opted in and a full rebuild
-    # has run — Catalogue.reload() must treat that as "zero people embedded there", not crash.
+    # Missing side-space files mean "nobody embedded there", not an error.
     matches, total = server.CATALOGUE.match_page("nobody-yet", 0, 50, space="side")
     assert matches == [] and total == 0, "an unfitted side space should look like an empty result, not raise"
 
@@ -190,24 +184,20 @@ def test_upsert_profile_stores_side_interest():
 
 
 def test_draft_bio_noop_without_api_key():
-    # The realistic condition for local dev/tests, and the required behavior in production if the
-    # key is ever unset/revoked: never attempt a network call, never raise, just decline the draft.
+    # No key: decline without a network call.
     assert server.ANTHROPIC_API_KEY == "", "test env must not have a real key set"
     assert server.draft_bio("Jane Doe", "Test University") is None
 
 
 def test_send_alert_email_noop_without_config():
-    # Same pattern as draft_bio: unconfigured must mean silently do nothing, never raise, never
-    # attempt a network call — this fires from inside the rebuild worker's exception handler, so it
-    # must never itself throw and mask the original failure.
+    # Unconfigured must do nothing: this runs inside the rebuild worker's exception handler.
     assert not (server.ALERT_EMAIL_TO and server.ALERT_SMTP_USER and server.ALERT_SMTP_PASSWORD), \
         "test env must not have real alert email config set"
     server.send_alert_email("test subject", "test body")  # must not raise
 
 
 def test_send_alert_email_swallows_send_failure():
-    # A misconfigured or unreachable SMTP server must not crash the caller (the rebuild worker) —
-    # confirmed by pointing at a config that's present but guaranteed to fail to connect.
+    # An unreachable SMTP server must not crash the caller either.
     with mock.patch.object(server, "ALERT_EMAIL_TO", "test@example.com"), \
          mock.patch.object(server, "ALERT_SMTP_USER", "test@example.com"), \
          mock.patch.object(server, "ALERT_SMTP_PASSWORD", "fake"), \
@@ -217,7 +207,7 @@ def test_send_alert_email_swallows_send_failure():
 
 
 class _FakeAnthropicResponse:
-    """Just enough of urllib's response object for draft_bio(): .read() plus context-manager protocol."""
+    """Just enough of urllib's response object for draft_bio()."""
     def __init__(self, payload):
         self._payload = json.dumps(payload).encode()
     def read(self):
@@ -229,10 +219,7 @@ class _FakeAnthropicResponse:
 
 
 def test_draft_bio_rejects_no_match_even_with_preamble():
-    # Regression: confirmed live against the real API during testing — Haiku sometimes narrates its
-    # search before the sentinel ("I'll search for information about this person... NO_MATCH")
-    # instead of replying with only NO_MATCH as instructed. An exact-string check missed this and
-    # would have handed that narration to a real attendee as their "bio."
+    # Narration around the NO_MATCH sentinel must still count as a decline.
     fake = _FakeAnthropicResponse({
         "stop_reason": "end_turn",
         "content": [{"type": "text", "text": "I'll search for information about this person.\n\nNO_MATCH"}],
@@ -253,8 +240,7 @@ def test_draft_bio_returns_clean_bio_text():
 
 
 def test_draft_bio_strips_leading_artifact():
-    # Regression: confirmed live — even the final text block can start with a stray leftover
-    # fragment (e.g. ".\n\n") from a truncated lead-in sentence, ahead of the real bio.
+    # A stray leading fragment before the bio is stripped.
     fake = _FakeAnthropicResponse({
         "stop_reason": "end_turn",
         "content": [{"type": "text", "text": ".\n\nDr. Real Person studies human factors."}],
@@ -265,12 +251,7 @@ def test_draft_bio_strips_leading_artifact():
 
 
 def test_draft_bio_ignores_interim_search_narration():
-    # Regression: confirmed live against the real API — without extended thinking, Haiku's reasoning
-    # between search rounds lands in separate visible text blocks ("I'll search...", "Not found, let
-    # me try again...") ahead of a final text block with the real bio. Joining every text block
-    # together (an earlier version of this fix) concatenated that narration onto the front of the
-    # real bio and returned the whole thing as the attendee's "profile." Only text blocks after the
-    # last tool-related block should count.
+    # Only text blocks after the last tool-related block count; search narration before it is dropped.
     fake = _FakeAnthropicResponse({
         "stop_reason": "end_turn",
         "content": [
@@ -291,10 +272,7 @@ def test_draft_bio_ignores_interim_search_narration():
 
 
 def test_draft_bio_joins_split_final_answer():
-    # Regression: confirmed live against the real API — the two-line answer (bolded headline, then
-    # one sentence) is sometimes split across two separate text blocks even after all tool use is
-    # done. Taking only the very last block (an earlier version of this fix) silently dropped the
-    # headline half of a correctly-formatted answer.
+    # An answer split across two trailing text blocks is joined, not truncated to the last one.
     fake = _FakeAnthropicResponse({
         "stop_reason": "end_turn",
         "content": [
@@ -308,16 +286,13 @@ def test_draft_bio_joins_split_final_answer():
     with mock.patch.object(server, "ANTHROPIC_API_KEY", "fake-key-for-test"), \
          mock.patch("urllib.request.urlopen", return_value=fake):
         result = server.draft_bio("Real Person", "Some University")
-    # Prompt no longer asks for a headline (2026-10-06); any stray Markdown is stripped.
+    # Stray Markdown is stripped.
     assert result == "Human-Automation Interaction and Trust\nInvestigates trust in automation and human-AI teaming.", \
         f"first text block was dropped: {result!r}"
 
 
 def test_draft_bio_strips_preamble_before_headline():
-    # Regression: confirmed live against the real API — a whole preamble sentence ("Based on my
-    # search results, I found that...") can precede the correctly-formatted answer with no tool-call
-    # boundary in between, so the block-splitting logic above can't separate them. The bolded headline
-    # line is the tell: real narration never uses that markdown.
+    # A preamble paragraph with no tool-call boundary before the answer is dropped.
     fake = _FakeAnthropicResponse({
         "stop_reason": "end_turn",
         "content": [{"type": "text", "text": (
@@ -371,11 +346,7 @@ def test_side_refit_due_respects_interval():
 
 
 def test_side_only_sentinel_is_not_valid_json():
-    # Documents exactly the bug class the worker's `detail_raw == "side_only"` check (checked
-    # BEFORE any json.loads attempt) avoids: "side_only" isn't valid JSON, so a naive try/except
-    # around json.loads() alone would silently swallow it into the same fallback as a legacy
-    # plain-string detail -- running a full BOTH-spaces rebuild instead of the side-only one that
-    # was actually requested.
+    # "side_only" isn't JSON; it must not fall into the legacy-string path and run a full rebuild.
     try:
         json.loads("side_only")
         raise AssertionError('"side_only" should not be valid JSON')
@@ -405,8 +376,7 @@ def test_start_rebuild_side_only_runs_the_right_subprocess():
 
 
 def test_periodic_side_refit_check_skips_when_a_real_job_is_queued():
-    # Must never compete with a real edit's rebuild -- if one is queued or running, this check
-    # should do nothing at all this cycle (no new job, no call to start_rebuild).
+    # Must not compete with a queued or running user-driven rebuild.
     with server.STORE.tx() as db:
         db.execute("DELETE FROM jobs")
         db.execute("INSERT INTO jobs(job_id,status,requested_at,detail) VALUES(%s,%s,%s,%s)",
@@ -416,6 +386,95 @@ def test_periodic_side_refit_check_skips_when_a_real_job_is_queued():
         server.periodic_side_refit_check()
     mock_start.assert_not_called()
     mock_timer.assert_called_once()  # still reschedules itself even when it skips
+
+
+def test_event_counter_is_anonymous_and_whitelisted():
+    c = server.app.test_client()
+    with server.STORE.tx() as db:
+        db.execute("DELETE FROM metrics")
+    assert c.post("/api/event", json={"kind": "save_contact"}).status_code == 204
+    assert c.post("/api/event", json={"kind": "save_contact"}).status_code == 204
+    assert c.post("/api/event", json={"kind": "visited_by_1.2.3.4"}).status_code == 400
+    assert c.post("/api/event", data="not json").status_code == 400
+    with server.STORE.tx() as db:
+        rows = db.execute("SELECT bucket, kind, n FROM metrics").fetchall()
+    assert len(rows) == 1 and rows[0]["kind"] == "save_contact" and rows[0]["n"] == 2
+    assert len(rows[0]["bucket"]) == 16, "minute bucket only (YYYY-MM-DDTHH:MM), never a full timestamp"
+
+
+def test_stats_requires_token_and_aggregates():
+    c = server.app.test_client()
+    with mock.patch.object(server, "ADMIN_TOKEN", "t0k"):
+        assert c.get("/api/stats").status_code == 403
+        assert c.get("/api/stats?token=wrong").status_code == 403
+        body = c.get("/api/stats?days=1", headers={"X-Rebuild-Token": "t0k"}).get_json()
+        assert any(m["kind"] == "save_contact" and m["n"] == 2 for m in body["metrics"])
+        assert c.get("/api/stats?token=t0k").status_code == 200, "query token for the dashboard page"
+        # People list: an edit must not make someone look like a new signup — "when" stays the first
+        # time they appeared, the later change shows up as "edited" with a count.
+        c.post("/api/profile", json={"profileId": "9001", "personId": "9001", "name": "Edit Tester", "aff": "X", "bio": "first"})
+        time.sleep(0.01)
+        c.post("/api/profile", json={"profileId": "9001", "personId": "9001", "name": "Edit Tester", "aff": "X", "bio": "second"})
+        me = next(p for p in c.get("/api/stats", headers={"X-Rebuild-Token": "t0k"}).get_json()["people"] if p["name"] == "Edit Tester")
+        assert me["edits"] == 1 and me["edited"] and me["when"] < me["edited"] and me["kind"] == "claimed", me
+        # Ledger-derived kinds: one first-time claim for this person, one profile edit, and a repeat
+        # POST with identical data (a re-claim) adds nothing to either.
+        c.post("/api/profile", json={"profileId": "9001", "personId": "9001", "name": "Edit Tester", "aff": "X", "bio": "second"})
+        c.post("/api/profile", json={"profileId": "n-abc", "name": "New Person", "aff": "Y", "bio": "hi"})
+        tot = {}
+        for m in c.get("/api/stats?days=1", headers={"X-Rebuild-Token": "t0k"}).get_json()["metrics"]:
+            tot[m["kind"]] = tot.get(m["kind"], 0) + m["n"]
+        assert tot.get("first_claimed", 0) >= 1 and tot.get("first_created", 0) >= 1 and tot.get("profile_edit") == 1, tot
+        c.post("/api/profile", json={"profileId": "9002", "personId": "9002", "name": "Student Tester", "aff": "Z", "bio": "s", "isStudent": True})
+        body2 = c.get("/api/stats?days=1", headers={"X-Rebuild-Token": "t0k"}).get_json()
+        assert body2["studentsTotal"] >= 1 and body2["studentsTotal"] <= body2["profilesTotal"], body2["studentsTotal"]
+        ranged = c.get("/api/stats?from=2000-01-01&to=2000-01-02", headers={"X-Rebuild-Token": "t0k"}).get_json()
+        assert ranged["metrics"] == [] and ranged["since"] >= "1999-10-04", "date range honoured and capped at 90 days"
+        assert c.get("/api/stats?from=junk", headers={"X-Rebuild-Token": "t0k"}).status_code == 200, "bad dates fall back"
+        with mock.patch.object(server, "DASHBOARD_TOKEN", "short"):
+            assert c.get("/api/stats?token=short").status_code == 200, "dashboard password works for stats"
+            assert c.post("/api/admin/rebuild", headers={"X-Rebuild-Token": "short"}).status_code == 403, "but never for a rebuild"
+
+
+def test_worker_unreachable_for_any_os_reason_falls_back_to_cold_path():
+    # 2026-10-07: a side refit that fired mid-deploy died with "[Errno 13] Permission denied: .../worker.sock"
+    # instead of running cold — the stat() itself raised, outside the connect() try block.
+    with mock.patch.object(type(server.WORKER_SOCKET), "exists", side_effect=PermissionError(13, "Permission denied")):
+        assert server._run_via_worker("side_only") is False
+
+
+def _wait_job(job_id, want, tries=200):
+    row = None
+    for _ in range(tries):
+        with server.STORE.tx() as db:
+            row = db.execute("SELECT status, attempts, detail, pending FROM jobs WHERE job_id=%s", (job_id,)).fetchone()
+        if row and row["status"] == want:
+            return row
+        time.sleep(0.05)
+    return row
+
+
+def test_failed_placement_is_retried_then_given_up_with_email_and_browser_notice():
+    with server.STORE.tx() as db:
+        db.execute("DELETE FROM jobs")
+    profile = {"profileId": "retry-me", "personId": "retry-me", "name": "Retry Person", "aff": "Test U", "bio": "x"}
+    sent = []
+    with mock.patch.object(server, "RETRY_DELAY_SECONDS", 0.05), \
+         mock.patch.object(server, "_run_via_worker", side_effect=RuntimeError("boom")), \
+         mock.patch.object(server.subprocess, "run", return_value=mock.Mock(returncode=1, stdout="", stderr="boom")), \
+         mock.patch.object(server, "send_alert_email", side_effect=lambda subject, body: sent.append((subject, body))), \
+         mock.patch.object(server, "REBUILD_DELAY_SECONDS", 0):
+        job_id = server.queue_rebuild(profile)["jobId"]
+        row = _wait_job(job_id, "failed")
+    assert row and row["status"] == "failed", f"expected a final failure, got {row}"
+    assert row["attempts"] == server.MAX_ATTEMPTS, f"should have tried {server.MAX_ATTEMPTS} times, tried {row['attempts']}"
+    assert json.loads(row["pending"])[0]["personId"] == "retry-me", "original pending list kept for the email and /api/placement"
+    assert len(sent) == 1, "exactly one email, after the last attempt"
+    assert "Retry Person" in sent[0][1] and "curl -s -XPOST" in sent[0][1] and "retry-me" in sent[0][1], "email carries a paste-ready fix"
+    c = server.app.test_client()
+    body = c.get("/api/placement?personId=retry-me").get_json()
+    assert body["placed"] is False and body["failed"] is True, f"browser must learn the job finally failed: {body}"
+    assert server.REBUILD_TIMER is None or not server.REBUILD_TIMER.is_alive(), "no timer left armed after giving up"
 
 
 if __name__ == "__main__":

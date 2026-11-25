@@ -20,9 +20,9 @@ RSYNC_RSH="ssh -i $KEY -o StrictHostKeyChecking=accept-new"
 # name-hash placeholder dots with keyword-overlap matches. The server's copies are the source of
 # truth; a deliberate new data export must be copied over by hand (then `embed_umap.py full`).
 rsync -az --delete -e "$RSYNC_RSH" \
-  --exclude '.git' --exclude 'state*' --exclude 'ec2-backup-*' --exclude '*.pdf' --exclude '.venv' --exclude '.python312' --exclude '__pycache__' \
+  --exclude '.git' --exclude 'state*' --exclude 'ec2-backup-*' --exclude 'aspire-2026-data' --exclude '*.pdf' --exclude '.venv' --exclude '.python312' --exclude '__pycache__' \
   --exclude '.local' --exclude '.cache' --exclude '.config' \
-  --exclude 'authors.csv' --exclude 'program.csv' --exclude 'embed_text.json' --exclude 'feed_revision.json' --exclude 'umap_positions.json' --exclude 'side_umap_positions.json' \
+  --exclude 'authors.csv' --exclude 'program.csv' --exclude 'embed_text.json' --exclude 'feed_revision.json' --exclude 'umap_positions.json' --exclude 'side_umap_positions.json' --exclude 'hobby_sim.json' \
   --exclude 'embeddings.npy' --exclude 'side_embeddings.npy' \
   --exclude 'embeddings_person_ids.json' --exclude 'side_embeddings_person_ids.json' \
   --exclude 'umap_reducer.joblib' --exclude 'side_umap_reducer.joblib' \

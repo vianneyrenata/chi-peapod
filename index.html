@@ -6,6 +6,7 @@
 <meta name="robots" content="noindex, nofollow, noarchive, noimageindex, noai, noimageai">
 <title>CHI Peapod - Prototype</title>
 <script>if (localStorage.getItem('peapod_theme') === 'dark') document.documentElement.classList.add('dark');</script>
+<script src="vendor/wordcloud2.min.js" defer></script>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🫛</text></svg>">
 <link rel="apple-touch-icon" href="img-asset/peapod-icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -13,9 +14,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Nunito:ital,wght@0,400..900;1,400..900&display=swap" rel="stylesheet">
 <style>
   :root{
-    /* Academic (default) = BLUE (CHI's colour; was green at HFES), Student = purple, Hobby = orange.
-       --purple is the historical name for "the accent colour"; it is NOT purple in the default theme.
-       Green is kept only for success states (.banner.found, .presenting, .btn.success). */
+    /* Academic = blue, Student = purple, Hobby = orange; --purple is the historical name for the accent. Green only for success states. */
     --purple:#1f6fd1;
     --purple-dark:#1858b0;
     --accent-light:#8ab8f0;  /* light end of the avatar/logo gradients */
@@ -38,9 +37,7 @@
     --accent-text:#5c3fe0;
     --tint:#f4f1ff;
   }
-  /* Side Interest View: swap the accent to orange — same mode-indicator trick, mutually
-     exclusive with Student View (see setViewMode()). Orange rather than blue/magenta: maximally
-     distinct from both green (main) and purple (student) on the wheel. */
+  /* Side Interest View: orange accent, mutually exclusive with Student View (setViewMode()). */
   body.side-view{
     --purple:#e8792e;
     --purple-dark:#c2601c;
@@ -49,9 +46,7 @@
     --tint:#fef7f0;  /* was #fdf1e6: accent text on it 4.39:1, now 4.60 */
   }
   *{box-sizing:border-box;}
-  /* Browsers give <button>/<input>/<select> their own UA font (Arial here) instead of the page's —
-     every button without an explicit font:inherit was rendering in Arial next to Nunito text
-     (close ✕, "Show more matches", the view picker, ? help, avatar pill, map controls). */
+  /* Buttons/inputs default to the UA font (Arial); force the page font everywhere. */
   button, input, textarea, select{ font-family:inherit; }
   body{
     margin:0;
@@ -92,16 +87,17 @@
   @keyframes in{ from{opacity:0; transform:translateY(10px);} to{opacity:1; transform:translateY(0);} }
 
   .backbtn{
-    position:absolute; top:20px; left:20px;
+    position:absolute; top:32px; left:28px;  /* flush with the screen's own padding box, not floating inside it */
     -webkit-tap-highlight-color:transparent;
-    width:32px;height:32px;border-radius:50%;
+    width:32px;height:32px;border-radius:50%; padding:0;
+    display:flex; align-items:center; justify-content:center; line-height:1;  /* the ← glyph sat low in the circle */
     background:#f4f4fa; border:none; color:var(--ink);
-    font-size:16px; cursor:pointer; z-index:5;
+    font-size:18px; cursor:pointer; z-index:5;
   }
   .backbtn:active{ background:#e6e6f0; }
 
   h1{ font-size:26px; margin:0 0 4px; }
-  .backbtn + h1{ margin-top:28px; }
+  .backbtn + h1{ margin-top:36px; }
   h2{ font-size:20px; margin:0 0 4px; }
   p.sub{ color:var(--gray); font-size:14px; margin:0 0 24px; }
 
@@ -119,6 +115,31 @@
   .btn.ghost{ background:transparent; color:var(--accent-text); font-weight:600; }
   .btn.ghost:active{ background:var(--tint); }
   .btn.small{ padding:10px; font-size:13px; }
+  .btn.outline{ background:#fff; color:var(--accent-text); border:2px solid var(--accent-text); }
+  .row.past{ opacity:.5; }
+  /* Hobby view: a cloud of chips instead of a map. Size = how many people share the hobby. */
+  .cloud-viewport{ position:relative; height:300px; overflow:hidden; border-radius:12px; touch-action:none; cursor:grab; user-select:none; -webkit-user-select:none; }
+  .cloud-viewport.dragging{ cursor:grabbing; }
+  .cloud-stage{ position:absolute; left:0; top:0; transform-origin:0 0; }
+  .cloud-stage span{ cursor:pointer; white-space:nowrap; }
+  .hobby-cloud{ display:flex; flex-wrap:wrap; gap:8px 8px; justify-content:center; align-items:center; padding:10px 2px 6px; }
+  .hobby{ border:1px solid transparent; border-radius:999px; padding:4px 12px; background:var(--tint); color:var(--accent-text); font-weight:700; cursor:pointer; line-height:1.2; }
+  .hobby small{ font-weight:600; opacity:.7; margin-left:4px; font-size:.75em; }
+  .hobby.mine{ background:var(--accent-text); color:var(--on-accent); }
+  .hobby.active{ border-color:var(--ink); }
+  .hobby:active{ filter:brightness(.9); }
+  .row.past .rowname::after, .ended-tag{ content:"ended"; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em;
+    color:var(--gray); border:1px solid var(--line); border-radius:999px; padding:1px 6px; margin-left:6px; vertical-align:middle; }
+  .bio-box{ border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin:0; background:#fbfbfe;
+    text-align:left; font-size:14.5px; line-height:1.5; white-space:pre-line; color:var(--ink);
+    max-height:42vh; overflow-y:auto; scrollbar-width:thin; scrollbar-color:var(--accent-text) var(--tint); } /* buttons stay on screen; the box scrolls */
+  .bio-box::-webkit-scrollbar{ width:10px; }
+  .bio-box::-webkit-scrollbar-track{ background:var(--tint); border-radius:999px; }
+  .bio-box::-webkit-scrollbar-thumb{ background:var(--accent-text); border-radius:999px; }
+  .bio-wrap{ position:relative; margin-bottom:14px; }
+  .bio-more{ position:absolute; left:1px; right:1px; bottom:1px; padding:30px 0 10px; text-align:center; font-size:12px; font-weight:700; color:var(--accent-text);
+    background:linear-gradient(to bottom, rgba(251,251,254,0), #fbfbfe 60%); border-radius:0 0 12px 12px; pointer-events:none; }
+  .bio-more.off{ display:none; }
 
   label{ font-size:12px; font-weight:600; color:var(--gray); display:block; margin:16px 0 6px; }
   input[type=text], textarea{
@@ -173,8 +194,7 @@
     margin-bottom:14px;
   }
   .topbar h1{ font-size:20px; white-space:nowrap; }
-  /* iPhone SE / 320px-wide phones: title + view pill + help + avatar don't fit on one line — the
-     avatar was pushed off the card's right edge. Let the controls wrap under the title instead. */
+  /* 320px phones: let the topbar controls wrap under the title. */
   .topbar{ flex-wrap:wrap; row-gap:8px; }
   .topbar > div{ flex-shrink:0; margin-left:auto; }
   .profile-pill{
@@ -186,15 +206,14 @@
   }
   .profile-pill:active{ opacity:.75; }
   .faq-btn{
-    width:28px;height:28px;border-radius:50%;
+    width:28px;height:28px;border-radius:50%; flex:0 0 28px; padding:0; line-height:1;  /* flex:0 0 keeps it a circle when the topbar is tight (it used to squash into an oval) */
     border:1.5px solid var(--line); background:#fff; color:var(--gray);
     font-size:13px; font-weight:700; cursor:pointer;
     display:flex;align-items:center;justify-content:center;
   }
   .faq-btn:hover, .faq-btn:active{ border-color:var(--purple); color:var(--purple); background:var(--tint); }
-  /* HIG: hit region >= 44x44pt. These stay visually small (28-32px circles) but get an invisible
-     tap pad around them via ::before, so the layout doesn't change. */
-  .backbtn, .faq-btn, .map-control{ position:relative; }
+  /* HIG: 44x44pt hit regions via an invisible ::before pad; visuals stay small. */
+  .faq-btn, .map-control{ position:relative; }  /* .backbtn is already absolute, which also anchors its ::before pad */
   .backbtn::before, .faq-btn::before, .map-control::before{ content:''; position:absolute; inset:-7px; }
   .faq-btn::before{ inset:-8px; }
   .faq-item{ margin-bottom:18px; }
@@ -278,8 +297,7 @@
     display:flex; align-items:center; justify-content:center;
   }
   .closebubble:active{ background:#f4f4fa; color:var(--ink); }
-  /* every bubble title sits next to the absolutely-positioned close button — reserve
-     space so long/wrapping text never runs under it */
+  /* reserve space so bubble titles never run under the absolute close button */
   .bubble h2{ padding:0 28px; }
   .presenting{
     font-size:12px; color:#16794a; background:#e9fbf1; border-radius:10px;
@@ -294,12 +312,8 @@
   .profile-field input:not([readonly]), .profile-field textarea:not([readonly]){
     border-color:var(--purple); background:#fbfbfe;
   }
-  /* Dark Mode (HIG dark-mode.md): light by default, the button in your own profile popup toggles html.dark
-     (saved in localStorage). ponytail: CSS nesting (Safari 17.2+/Chrome 120+); older browsers just stay light. Blue-tinted charcoal,
-     popups one step lighter than the page (base/elevated); accents LIGHTENED so accent text is 6-9:1,
-     which means filled buttons take a dark label (--on-accent) instead of white.
-     Light mode still uses a few literal colours (#fff, #fbfbfe, #f4f4fa) — each one is overridden below;
-     a new literal light colour needs a line here too. */
+  /* Dark Mode: light by default, toggled by html.dark (localStorage). CSS nesting (Safari 17.2+/Chrome 120+); older browsers stay light.
+     Accents are lightened so accent text is 6-9:1, so filled buttons take a dark label. Every literal light colour needs an override here. */
   html.dark{
   &{
     --purple:#4b8fe8; --purple-dark:#3a76c9; --accent-light:#9cc3f5;
@@ -315,6 +329,9 @@
   .btn.secondary, .backbtn{ background:var(--raised); color:var(--ink); }
   .btn.danger{ background:#3a1d1d; color:#ff9b9b; }
   .btn.success{ background:var(--accent-text); color:var(--on-accent); }
+  .btn.outline{ background:var(--surface); }
+  .bio-box{ background:var(--surface); }
+  .bio-more{ background:linear-gradient(to bottom, rgba(31,38,33,0), var(--surface) 60%); }
   input[type=text], textarea, .umap-card, .row, .profile-field input:not([readonly]), .profile-field textarea:not([readonly]){ background:var(--surface); }
   .aff-suggestions, .aff-option, .faq-btn, .map-control{ background:var(--raised); }
   .aff-option{ border-bottom-color:var(--line); }
@@ -355,7 +372,7 @@
       <div class="aff-suggestions" id="affOptions" aria-label="Affiliation suggestions"></div>
       <div class="banner warn" id="keyinNote" style="display:none; margin-top:10px;">Please add your affiliation.</div>
       <div class="spacer"></div>
-      <button class="btn" onclick="lookup()">Find me</button>
+      <button class="btn" id="findBtn" onclick="lookup()">Find me</button>
     </div>
 
     <!-- 3a. Not found: typo -->
@@ -375,11 +392,11 @@
       <p class="sub">You're new here - tell us a bit about your work so we can match you.</p>
       <div class="banner warn" id="draftNote" style="display:none; margin-bottom:10px;">We couldn't find anything about you online. Please replace the placeholder below with a few sentences about your work.</div>
       <label>Short bio</label>
-      <textarea id="inBio" placeholder="A few sentences about what you work on, e.g. accessibility, tangible interfaces, social computing"></textarea>
-      <label>Non-academic interests <span style="font-weight:400;">- optional, for the Side Interests view</span></label>
+      <textarea id="inBio" placeholder="A few sentences about what you work on, e.g. accessibility, tangible interfaces, social computing" oninput="syncBuildReady()"></textarea>
+      <label>Non-academic interests <span style="font-weight:400;">- optional · separate them with commas</span></label>
       <textarea id="inSideInterest" placeholder="e.g. fountain pens, mechanical keyboards, running"></textarea>
       <div class="spacer"></div>
-      <button class="btn" onclick="createNewProfile()">Build my profile</button>
+      <button class="btn" id="buildBtn" onclick="createNewProfile()" disabled>Build my profile</button>
     </div>
 
     <!-- 3c. Drafting: a web-search-backed starting bio, while the person waits -->
@@ -395,12 +412,45 @@
     <!-- 3c. Placing a new/edited profile on the map. Polls /api/placement (see waitForPlacement())
          so people wait ~a minute here with a clear status instead of landing on Home with a
          placeholder dot and keyword-overlap matches. -->
+    <!-- After a claim (never after a new signup): two optional questions, one per screen. -->
+    <div class="screen" data-screen="askhobby">
+      <div style="padding:8px 4px 0;">
+        <h1 style="margin-top:36px;" id="askHobbyTitle">Welcome!</h1>
+        <p class="sub">You're on the map. Would you like to add your non-academic interests?</p>
+        <label>Non-academic interests <span style="font-weight:400;">- optional · separate them with commas</span></label>
+        <textarea id="askHobby" placeholder="e.g. trail running, board games, coffee" style="min-height:90px;"></textarea>
+        <div class="cap" style="font-weight:400; margin:6px 2px 0;">People who share one show up in your Hobby view.</div>
+        <div class="spacer"></div>
+        <button class="btn" onclick="askHobbyContinue()">Continue</button>
+        <button class="btn ghost" style="margin-top:6px;" onclick="askHobbySkip()">Skip</button>
+      </div>
+    </div>
+    <div class="screen" data-screen="askbio">
+      <div style="padding:8px 4px 0;">
+        <h1 style="margin-top:36px;">Would you like to change your bio?</h1>
+        <p class="sub">This is what other attendees see and what your matches are based on.</p>
+        <div class="bio-wrap"><div class="bio-box" id="askBioView" onscroll="bioScrollHint()"></div><div class="bio-more" id="askBioMore">scroll for more &darr;</div></div>
+        <div class="spacer"></div>
+        <button class="btn" onclick="askBioOk()">Looks good, take me to the map</button>
+        <button class="btn outline" style="margin-top:8px;" onclick="askBioEdit()">&#9998; Edit my bio</button>
+      </div>
+    </div>
+
     <div class="screen" data-screen="placing">
       <div class="center" style="margin-top:80px;">
         <img src="img-asset/peapod-mascot-v2.png" alt="" style="width:140px; height:auto; display:block; margin:0 auto 12px; animation:dreamyFloat 1.8s ease-in-out infinite;">
         <h1 id="placingTitle">Teleporting you in&hellip;</h1>
-        <p class="sub">Adding you to the map and finding your matches. This takes a few seconds.</p>
-        <div class="map-loading active" style="position:static; margin-top:10px;" aria-label="Please wait"><span></span><span></span><span></span></div>
+        <p class="sub" id="placingSub">Adding you to the map and finding your matches. This takes a few seconds.</p>
+        <div class="map-loading active" id="placingDots" style="position:static; margin-top:10px;" aria-label="Please wait"><span></span><span></span><span></span></div>
+        <div id="placingFail" style="display:none; text-align:left;">
+          <div class="banner warn" style="margin-top:14px;">
+            <b id="placingFailTitle">We couldn't place you on the map.</b><br>
+            Your profile is saved, so nothing is lost. Please email
+            <a href="mailto:vrenata@wisc.edu" id="placingMail">vrenata@wisc.edu</a> with a screenshot of this screen and we'll fix it.
+            <div style="margin-top:6px; font-size:12px;">Reference: <code id="placingRef"></code></div>
+          </div>
+          <button class="btn" style="margin-top:12px;" onclick="renderHome(); show('home');">Continue to the app</button>
+        </div>
       </div>
     </div>
 
@@ -409,7 +459,9 @@
       <div class="center" style="margin-top:100px;">
         <div style="font-size:52px; margin-bottom:16px;">&#128546;</div>
         <h1>Couldn't load matches</h1>
-        <p class="sub">Refreshing usually fixes this. If it keeps happening, please contact the authors.</p>
+        <p class="sub">Refreshing usually fixes this. If it keeps happening, please email
+          <a href="mailto:vrenata@wisc.edu?subject=HFE%20Peapod%3A%20couldn%27t%20load%20matches&body=Hi%20Vianney%2C%0A%0AThe%20app%20shows%20%22Couldn%27t%20load%20matches%22%20even%20after%20refreshing.%0A%0A(screenshot%20attached)%0A">vrenata@wisc.edu</a>
+          with a screenshot of this screen.</p>
         <button class="btn secondary small" onclick="location.reload()">Refresh</button>
       </div>
     </div>
@@ -417,7 +469,7 @@
     <!-- 4. Prepopulated profile (found) -->
     <div class="screen" data-screen="profile">
       <button class="backbtn" onclick="show('keyin')">←</button>
-      <div class="center" style="margin-top:8px;">
+      <div class="center">
         <div class="avatar" id="profAvatar"></div>
         <div class="banner found">✓ Profile found - review &amp; confirm</div>
       </div>
@@ -429,10 +481,10 @@
         <label>Profile</label>
         <textarea id="profBio" readonly></textarea>
         <div id="profBioView" style="display:none; white-space:pre-line; text-align:left; font-size:15px; color:var(--ink); padding:2px 0;"></div>
-        <label>Non-academic interests <span id="profSideHint" style="font-weight:400;">- optional, for the Side Interests view</span></label>
+        <label>Non-academic interests <span id="profSideHint" style="font-weight:400;">- optional · separate them with commas</span></label>
         <textarea id="profSideInterest" readonly placeholder="None"></textarea>
-        <label id="studentQuestionRow" style="display:flex; align-items:center; gap:8px; margin-top:12px; cursor:pointer;">
-          <input type="checkbox" id="profIsStudent" style="width:auto;">
+        <label id="studentQuestionRow" style="display:flex; align-items:center; gap:10px; margin-top:14px; cursor:pointer; font-size:15px; font-weight:600; color:var(--ink); text-transform:none; letter-spacing:0;">
+          <input type="checkbox" id="profIsStudent" style="width:22px; height:22px; margin:0; accent-color:var(--accent-text); flex-shrink:0;">
           I'm a student
         </label>
       </div>
@@ -456,6 +508,12 @@
       <input type="text" id="searchInput" placeholder="Search attendees by name..." aria-label="Search attendees by name" oninput="runSearch()" style="margin-bottom:8px;">
       <div id="searchResults"></div>
       <div class="section-divider"></div>
+      <div id="sideSelfGate" style="display:none; text-align:center; padding:40px 16px;">
+        <div style="font-size:44px; margin-bottom:10px;">🖋️</div>
+        <div style="font-weight:700; font-size:16px; margin-bottom:6px;">Oops, you haven't added yours yet!</div>
+        <div style="font-size:13px; color:var(--gray); max-width:280px; margin:0 auto 16px;">Add your non-academic interests to see everyone else's and who shares them.</div>
+        <button class="btn" style="width:auto; padding:12px 22px;" onclick="addMyHobbies()">Add mine</button>
+      </div>
       <div id="sideViewPlaceholder" style="display:none; text-align:center; padding:40px 16px;">
         <div style="font-size:44px; margin-bottom:10px;">🖋️</div>
         <div style="font-weight:700; font-size:16px; margin-bottom:6px;">Oops, not enough people yet!</div>
@@ -466,18 +524,21 @@
           <div class="map-header">
             <div class="cap">Attendee interest map</div>
             <div class="map-controls" aria-label="Map zoom controls">
-              <button class="map-control" onclick="zoomUmap(-1)" aria-label="Zoom out">−</button>
+              <button class="map-control" onclick="zoomActive(-1)" aria-label="Zoom out">−</button>
               <span class="zoom-label" id="umapZoomLabel">100%</span>
-              <button class="map-control" onclick="zoomUmap(1)" aria-label="Zoom in">+</button>
-              <button class="map-control" onclick="resetUmapZoom()" aria-label="Reset map zoom" title="Reset zoom">↺</button>
+              <button class="map-control" onclick="zoomActive(1)" aria-label="Zoom in">+</button>
+              <button class="map-control" onclick="resetActiveZoom()" aria-label="Reset zoom" title="Reset zoom">↺</button>
             </div>
           </div>
           <div class="map-explainer" id="mapExplainer">A map of everyone's interests - people working on similar things end up closer together. It's not geography, just how alike people's research focus is.</div>
-          <div id="sideViewSelfNotice" style="display:none; font-size:12px; color:var(--gray); margin:6px 4px 0;">You haven't added your side interests yet - edit your profile to appear on this map.</div>
-          <div class="map-stage">
+          <div id="sideViewSelfNotice" style="display:none; font-size:12px; color:var(--gray); margin:6px 4px 0;">You haven't added your non-academic interests yet - add them from your profile to see who shares them.</div>
+          <div class="map-stage" id="mapStage">
             <svg viewBox="0 0 320 190" width="100%" height="170" id="umapSvg" role="img" aria-label="Map of attendees arranged by research similarity. Your closest matches are listed below the map."></svg>
             <div class="map-loading" id="mapLoading" aria-label="Loading map"><span></span><span></span><span></span></div>
           </div>
+          <div id="hobbyViewport" class="cloud-viewport" style="display:none;" role="img" aria-label="Word cloud of hobbies people have added; bigger means more people share it. Pinch or use the + and - buttons to zoom; tap a hobby to see who shares it."><div id="hobbyStage" class="cloud-stage"></div></div>
+          <div id="hobbyCloud" class="hobby-cloud" style="display:none;" role="list" aria-label="Hobbies people have added, bigger means more people"></div>
+          <div id="hobbyPeople" style="display:none;"></div>
           <div class="cap" id="embeddingsUpdated" style="margin:6px 4px 0; font-weight:400;"></div>
         </div>
         <div class="list-title"><span aria-hidden="true">⭐</span> Top matches for you</div>
@@ -682,9 +743,7 @@ const CLUSTERS = {
 };
 const CLUSTER_CENTERS = { hri:{x:130,y:50}, aviation:{x:245,y:105}, auto:{x:75,y:150}, health:{x:45,y:85} };
 
-// No fictional placeholder people — empty until loadRealData() fetches the real CSVs/JSON.
-// A fetch failure (e.g. opened as a file:// page, or the server being down) leaves these
-// empty rather than showing made-up attendees; renderHome() only renders whoever's here.
+// Empty until loadRealData() fetches the real CSVs/JSON; a fetch failure leaves them empty.
 let ATTENDEES = [];
 let COAUTHORS = new Map();  // personId -> Set of co-author personIds; built in loadRealData()
 let LECTURES = [];
@@ -707,21 +766,20 @@ let matchVisibleCount = 3;
 let lectureVisibleCount = 3;
 let loadedMatchCandidates = null;
 let loadedMatchTotal = 0;
-// studentViewOn/sideViewOn are derived, mutually-exclusive flags kept in sync by setViewMode()
-// below — most of the rendering code (renderHome, showMoreMatches, openBubble, matchScore
-// callers) reads these two booleans directly rather than a single 'viewMode' string, so they
-// stay as the source of truth other functions branch on.
+// Derived, mutually-exclusive flags kept in sync by setViewMode(); rendering code branches on them.
 let studentViewOn = false;
 let sideViewOn = false;
 let viewMode = 'everyone'; // 'everyone' | 'student' | 'side' — drives the View picker's UI only
-// Purely a UX floor for the placeholder screen ("come back later") — distinct from
-// embed_umap.py's MIN_SPACE_PEOPLE=2, which is the hard floor UMAP needs to not crash.
-// Below this the side map/matches would technically render but look sparse and arbitrary.
-const SIDE_VIEW_MIN_PEOPLE = 10;
+// UX floor for the placeholder screen; embed_umap.py's MIN_SPACE_PEOPLE is the hard floor.
+const SIDE_VIEW_MIN_PEOPLE = 3;
+// hobby_sim.json (embed_umap.py): cosine similarity between distinct hobby terms. Missing file → exact matches only.
+let HOBBY_SIM = new Map();  // "a|b" (sorted) -> raw cosine similarity
+// Cosine → credit: 0 below the floor, linear to the knee, flat at the cap: a related hobby is partial credit, never a full match.
+const HOBBY_FLOOR = 0.35, HOBBY_KNEE = 0.65, HOBBY_CAP = 0.8;  // hand-picked; no hub damping for generic words yet
+const hobbyCredit = s => s <= HOBBY_FLOOR ? 0 : HOBBY_CAP * Math.min(1, (s - HOBBY_FLOOR) / (HOBBY_KNEE - HOBBY_FLOOR));  // a cloud of chips reads fine with a handful of people (the old UMAP needed ~10)
 let SIDE_EMBEDDED_COUNT = 0;
 
-// One shared "View" trigger + picker sheet instead of separate always-visible toggle
-// buttons (Student View, Side Interests) crowding the topbar — see openViewModePicker().
+// One shared "View" trigger + picker sheet instead of separate toggles in the topbar.
 const VIEW_MODE_META = {
   everyone: { label: '👥 Academic', sub: 'Matches based on research interests - everyone at the conference.' },
   student:  { label: '🎓 Student', sub: 'Only match with other students.' },
@@ -748,6 +806,7 @@ function closeViewModePicker(){ document.getElementById('viewModeOverlay').class
 function closeViewModePickerBg(e){ if (e.target.id === 'viewModeOverlay') closeViewModePicker(); }
 
 async function setViewMode(mode){
+  track('view_' + mode);
   closeViewModePicker();
   if (mode === viewMode) return;
   viewMode = mode;
@@ -755,9 +814,7 @@ async function setViewMode(mode){
   sideViewOn = mode === 'side';
   document.body.classList.toggle('student-view', studentViewOn);
   document.body.classList.toggle('side-view', sideViewOn);
-  // Both filtered views need the map/matches pre-filtered by the server (client-side filtering
-  // of just the top-5 baked matches would often show zero results) — drop whatever's loaded
-  // and re-fetch the first page with the right filter applied.
+  // Filtered views need server-side filtering (the baked top-5 alone would often be empty): refetch the first page.
   loadedMatchCandidates = null; loadedMatchTotal = 0; matchVisibleCount = 3;
   if (studentViewOn && currentUser?.personId){
     try {
@@ -772,6 +829,16 @@ async function setViewMode(mode){
   }
   renderHome();
 }
+// Anonymous usage counter (/dashboard-traffic): event name only, per-hour counts. Fire-and-forget.
+function track(kind){
+  try {
+    const body = new Blob([JSON.stringify({kind})], {type: 'application/json'});
+    if (!(navigator.sendBeacon && navigator.sendBeacon('/api/event', body)))
+      fetch('/api/event', {method: 'POST', body, keepalive: true}).catch(() => {});
+  } catch (_) {}
+}
+let _searchTrack = null;
+
 async function api(path, options={}){
   const response = await fetch(path, {
     credentials:'same-origin',
@@ -781,17 +848,12 @@ async function api(path, options={}){
   if (!response.ok) throw new Error(`API ${response.status}`);
   return response.json();
 }
-// Edits are saved on this device instantly; reaching the server can fail (conference Wi-Fi,
-// server restart). Rather than silently dropping the edit — the person would think everyone can
-// see their new bio when nobody can — remember that it's unsent, say so, and retry when the
-// browser comes back online / the page is next opened.
+// Edits save locally at once; if the server can't be reached, remember it's unsent, say so, and retry later.
 const PENDING_PUBLISH_KEY = 'hfes_match_pending_publish';
 async function publishProfileEdit(){
   try {
     const data = await api('/api/profile', {method:'POST', body:JSON.stringify(currentUser)});
-    // New signups begin without a conference person ID. Retain the API's
-    // generated profile ID: the next full rebuild uses that same value as the
-    // attendee ID in the CSV/UMAP, letting this browser reconnect to its dot.
+    // New signups keep the API's profile ID: the next rebuild uses it as the attendee ID, so this browser finds its dot.
     if (!currentUser.personId && data?.profile?.profileId){
       currentUser = {...currentUser, personId:data.profile.profileId};
       persistLocalProfile();
@@ -806,25 +868,41 @@ async function publishProfileEdit(){
   }
 }
 // ---------- placement wait ----------
-// A signup or bio edit queues ONE incremental placement server-side (HFES_AUTO_REBUILD_SECONDS quiet
-// window, 30s in production, plus a ~30s job). Hold people on the "Creating/Updating your profile…"
-// screen and poll /api/placement until their real dot + matches exist, then land on Home with those
-// in hand. "Placed" for an edit = the server's updated_at stamp differs from the one read BEFORE
-// publishing (no client/server clock comparison). Gives up after PLACEMENT_MAX_MS and lands on Home
-// anyway; the existing "takes a few minutes… check back shortly" note covers that case.
+// A signup/edit queues one incremental placement; poll /api/placement until the dot + matches exist, then go Home.
+// "Placed" for an edit = the server's updated_at differs from the one read before publishing. Gives up after PLACEMENT_MAX_MS.
 const PLACEMENT_POLL_MS = 1000, PLACEMENT_MAX_MS = 180000;  // ~1 s per poll: with the warm worker a placement lands in a few seconds
 async function placementStamp(){
   try { const d = await api(`/api/placement?personId=${encodeURIComponent(currentUser.personId)}`); return d.placed ? d.updatedAt : null; }
   catch (_) { return null; }
 }
+// Shown when the server gave up on the placement or it is taking far too long: email in with a screenshot.
+function showPlacingFailure(final){
+  document.getElementById('placingDots').style.display = 'none';
+  document.getElementById('placingTitle').textContent = final ? 'Hmm, that didn\'t work' : 'This is taking longer than usual';
+  document.getElementById('placingSub').textContent = '';
+  document.getElementById('placingFailTitle').textContent = final
+    ? "We couldn't place you on the map."
+    : "You can keep using the app - your dot may still appear in a few minutes. If it hasn't after 10 minutes:";
+  const ref = `${currentUser.personId} · ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+  document.getElementById('placingRef').textContent = ref;
+  document.getElementById('placingMail').href = 'mailto:vrenata@wisc.edu?subject=' + encodeURIComponent('CHI Peapod: my dot did not appear')
+    + '&body=' + encodeURIComponent(`Hi Vianney,\n\nMy profile didn't get placed on the map.\nName: ${currentUser.name}\nAffiliation: ${currentUser.aff}\nReference: ${ref}\n\n(screenshot attached)\n`);
+  document.getElementById('placingFail').style.display = 'block';
+}
 async function waitForPlacement(mode, prevStamp){
-  document.getElementById('placingTitle').innerHTML = mode === 'update' ? 'Moving your dot&hellip;' : 'Teleporting you in&hellip;';
+  document.getElementById('placingTitle').innerHTML = mode === 'update' ? 'Applying changes&hellip;' : 'Teleporting you in&hellip;';
+  document.getElementById('placingSub').textContent = 'Adding you to the map and finding your matches. This takes a few seconds.';
+  document.getElementById('placingDots').style.display = '';
+  document.getElementById('placingFail').style.display = 'none';
   show('placing');
   const t0 = Date.now();
   while (Date.now() - t0 < PLACEMENT_MAX_MS){
     await new Promise(r => setTimeout(r, PLACEMENT_POLL_MS));
     let d = null;
     try { d = await api(`/api/placement?personId=${encodeURIComponent(currentUser.personId)}`); } catch (_) {}
+    if (d && d.failed){ track('placement_failed'); showPlacingFailure(true); return; }  // server gave up after its retries
+    if (d && d.jobStatus === 'queued' && Date.now() - t0 > 15000)
+      document.getElementById('placingSub').textContent = 'Taking a moment longer - retrying automatically.';
     if (d && d.placed && d.updatedAt !== prevStamp){
       const b = d.bounds;  // same scaling as loadRealData()'s scaleX/scaleY
       currentUser = {...currentUser,
@@ -833,11 +911,13 @@ async function waitForPlacement(mode, prevStamp){
         topMatches: d.topMatches};
       persistLocalProfile();
       loadedMatchCandidates = null;
-      break;
+      renderHome();
+      show('home');
+      return;
     }
   }
-  renderHome();
-  show('home');
+  track('placement_timeout');
+  showPlacingFailure(false);  // 3 minutes with no result: let them continue, with the email as a fallback
 }
 function setSyncNotice(text){
   const el = document.getElementById('syncNotice');
@@ -851,13 +931,11 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) retr
 
 function initials(name){ return name.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase(); }
 
-// Security boundary: name/aff/bio are user-supplied via POST /api/profile and rendered for EVERY
-// visitor — every innerHTML interpolation of them must go through here (stored-XSS fix, 2026-09-18).
+// Security boundary: user-supplied name/aff/bio are rendered for every visitor; every innerHTML interpolation goes through here.
 function escapeHtml(s){
   return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
-// Bios (s_profile, or anyone's self-typed edit) can contain **word** — render that as real
-// bold. Escape first so a self-typed bio can't inject markup; only ** pairs we wrap ourselves.
+// Bios may contain **word**: escape first, then wrap only the ** pairs we match ourselves.
 // Escaped name plus the claimed-profile circle (CSS .claimed-dot) when the person claimed it.
 function nameHtml(p){
   return escapeHtml(p.name) + (p.claimed ? '<span class="claimed-dot" role="img" aria-label="attending, profile claimed"></span>' : '');
@@ -867,8 +945,7 @@ function renderBio(bio){
   return escapeHtml(bio).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
 }
 
-// Keep the signed-in profile in this browser. This is intentionally local-only:
-// the app can still open it on a later visit even if the API is temporarily down.
+// Signed-in profile is kept locally on purpose: the app opens it even if the API is down.
 function persistLocalProfile(){
   if (!currentUser) return false;
   try {
@@ -889,7 +966,7 @@ function toggleSave(p){
   const key = personKey(p);
   const ids = getSavedIds();
   const idx = ids.indexOf(key);
-  if (idx === -1) ids.push(key); else ids.splice(idx, 1);
+  if (idx === -1) { ids.push(key); track('save_contact'); } else ids.splice(idx, 1);
   setSavedIds(ids);
   return idx === -1; // true if now saved
 }
@@ -901,7 +978,7 @@ function isProgramSaved(l){ return getSavedProgramIds().includes(l.id); }
 function toggleSaveProgram(l){
   const ids = getSavedProgramIds();
   const idx = ids.indexOf(l.id);
-  if (idx === -1) ids.push(l.id); else ids.splice(idx, 1);
+  if (idx === -1) { ids.push(l.id); track('save_program'); } else ids.splice(idx, 1);
   setSavedProgramIds(ids);
   return idx === -1; // true if now saved
 }
@@ -947,9 +1024,8 @@ function classify(text){
 
 function hashCode(s){ let h=0; for(let i=0;i<s.length;i++) h=(h*31 + s.charCodeAt(i))|0; return h; }
 
-// "Schedule Detail" packs date/time/location/session/title/role into one generated string
-// ("2026-10-20 1:50 pm-2:10 pm · Nevada 6/7 · Session Name · Title [Role]") — pull it apart into
-// real fields instead of showing the raw blob. Verified against all 2,488 entries in the CSV.
+// "Schedule Detail" packs date/time/location/session/title/role into one string
+// ("2027-05-11 9:00 am-10:30 am · Room 310 · Session Name · Title [Role]"); SCHEDULE_RE pulls it apart. Keep in sync with chi_feed.py.
 const SCHEDULE_RE = /^(\d{4}-\d{2}-\d{2}) (\d{1,2}:\d{2} ?[ap]m-\d{1,2}:\d{2} ?[ap]m) · ([^·]+) · ([^·]+) · (.+) \[([^\]]+)\]$/;
 function parseScheduleDetail(entry){
   const m = entry.match(SCHEDULE_RE);
@@ -963,10 +1039,231 @@ function fmtDate(dateStr){
 }
 // program.csv already gives Day/Date/Start Time/End Time as separate columns — just format, no parsing needed
 function sessionsOf(l){ return LECTURES.filter(x => x.id === l.id); }
+// Past = end time behind the phone's clock (attendees are at the venue); greyed, never removed.
+// Cancelled: chi_feed.py prefixes the session name with CANCELLED: (feed addons.cancelled).
+function programCancelled(l){ return /^\(?cancell?ed/i.test(l.sessionName || l.session || ''); }
+const programTitle = l => (programCancelled(l) ? 'Canceled: ' : '') + (l.title || '');
+function programPast(l){
+  if (!l.date || !l.endTime) return false;
+  const end = new Date(l.date + 'T00:00:00'); end.setMinutes(timeToMinutes(l.endTime));
+  return end.getTime() < Date.now();
+}
 function fmtProgramWhen(l){
   const monthDay = new Date(l.date+'T12:00:00').toLocaleDateString('en-US', {month:'short', day:'numeric'});
   return `${l.day}, ${monthDay} · ${l.startTime}–${l.endTime}${l.location ? ' · '+l.location : ''}`;
 }
+
+// ---------- hobbies: split, normalise, index ----------
+// Commas are the rule; semicolons, newlines, slashes and " and " are forgiven. Mirrors embed_umap.parse_hobbies().
+function parseHobbies(text){
+  return [...new Set((text || '').toLowerCase().split(/[,;\n\/]|\band\b|&/).map(t => t.replace(/[.!]+$/, '').replace(/\s+/g, ' ').trim())
+    .filter(t => t && t.length <= 40)
+    .map(t => t.length > 4 && /[^s]s$/.test(t) && !/(ss|us|is)$/.test(t) ? t.slice(0, -1) : t))];  // plain plurals → singular
+}
+// The same split as parseHobbies(), but keeping the person's own casing: what we show and what we save.
+function splitHobbiesRaw(text){
+  return [...new Set((text || '').split(/[,;\n\/]|\band\b|&/).map(t => t.replace(/[.!]+$/, '').replace(/\s+/g, ' ').trim()).filter(t => t && t.length <= 40))];
+}
+const hobbiesCommaSeparated = text => splitHobbiesRaw(text).join(', ');  // "golf; chess\nreading" → "golf, chess, reading"
+let HOBBY_INDEX = null;  // key -> [people]; rebuilt per render, cheap (hundreds of people at most)
+let HOBBY_LABEL = new Map();  // key -> how the first person spelled it ("board games", not the matching key "board game")
+function buildHobbyIndex(){
+  HOBBY_INDEX = new Map(); HOBBY_LABEL = new Map();
+  const people = [...ATTENDEES];
+  if (currentUser && !people.find(p => personKey(p) === personKey(currentUser))) people.push(currentUser);
+  people.forEach(p => {
+    const raw = (p.sideInterest || '').split(/[,;\n\/]|\band\b|&/).map(t => t.replace(/[.!]+$/, '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+    const keys = parseHobbies(p.sideInterest);
+    keys.forEach((t, i) => {
+      if (!HOBBY_INDEX.has(t)){ HOBBY_INDEX.set(t, []); HOBBY_LABEL.set(t, (raw.find(r => parseHobbies(r)[0] === t) || t).toLowerCase()); }
+      HOBBY_INDEX.get(t).push(p);
+    });
+  });
+  return HOBBY_INDEX;
+}
+const hobbyLabel = t => HOBBY_LABEL.get(t) || t;
+function hobbyPeopleCount(){ const s = new Set(); (HOBBY_INDEX || buildHobbyIndex()).forEach(ps => ps.forEach(p => s.add(personKey(p)))); return s.size; }
+// Hobby matches: for each of your hobbies the closest of theirs (same = 1, else hobbyCredit(sim)), averaged;
+// then the same from their side; score = mean of both directions, so "sports" vs ten sports isn't a perfect match.
+const hobbyPairKey = (a, b) => a < b ? a + '|' + b : b + '|' + a;
+function hobbySim(a, b){
+  if (a === b) return 1;
+  return hobbyCredit(HOBBY_SIM.get(hobbyPairKey(a, b)) || 0);
+}
+function hobbyDirectional(mine, theirs){
+  let total = 0;
+  mine.forEach(m => { let best = 0; theirs.forEach(t => { best = Math.max(best, hobbySim(m, t)); }); total += best; });
+  return total / mine.length;
+}
+function hobbyMatches(me){
+  const mine = parseHobbies(me.sideInterest);
+  if (!mine.length) return [];
+  const people = [...ATTENDEES];
+  const out = [];
+  people.forEach(p => {
+    if (personKey(p) === personKey(me)) return;
+    const theirs = parseHobbies(p.sideInterest);
+    if (!theirs.length) return;
+    const score = (hobbyDirectional(mine, theirs) + hobbyDirectional(theirs, mine)) / 2;
+    if (score <= 0) return;
+    const shared = mine.filter(t => theirs.includes(t));
+    out.push({...p, shared, score: Math.round(100 * score), rawScore: score});
+  });
+  return out.sort((a, b) => b.rawScore - a.rawScore || b.shared.length - a.shared.length || a.name.localeCompare(b.name));
+}
+let activeHobby = null;
+const ORIGINAL_RANDOM = Math.random;  // restored after each cloud layout (see renderHobbyCloud)
+// Every hobby shared by ≥ HOBBY_CLOUD_MIN_PEOPLE people, capped at HOBBY_CLOUD_MAX; singles stay searchable.
+const HOBBY_CLOUD_MIN_PEOPLE = 2, HOBBY_CLOUD_MAX = 60;  // 
+// Stage is CLOUD_SCALE× the card width inside a pan/zoom viewport, so zooming makes rare hobbies legible.
+const CLOUD_SCALE = 2;
+let cloudZoom = 1, cloudPanX = 0, cloudPanY = 0, cloudFit = 0.5, cloudDragMoved = false;
+let cloudStageKey = '';  // which term list the stage currently shows — re-layout only when it changes
+let cloudBox = null;  // bounding box of the drawn words on the stage (stage px); the layout rarely fills the stage
+function applyCloudTransform(){
+  const stage = document.getElementById('hobbyStage'), vp = document.getElementById('hobbyViewport');
+  const s = cloudFit * cloudZoom;
+  // Clamp the pan to the drawn words, not the stage.
+  const box = cloudBox || {x: 0, y: 0, w: stage.offsetWidth, h: stage.offsetHeight};
+  const w = box.w * s, hh = box.h * s, vw = vp.clientWidth, vh = vp.clientHeight, ox = box.x * s, oy = box.y * s;
+  cloudPanX = w <= vw ? (vw - w) / 2 - ox : Math.min(-ox, Math.max(vw - w - ox, cloudPanX));
+  cloudPanY = hh <= vh ? (vh - hh) / 2 - oy : Math.min(-oy, Math.max(vh - hh - oy, cloudPanY));
+  stage.style.transform = `translate(${cloudPanX}px, ${cloudPanY}px) scale(${s})`;
+  const label = document.getElementById('umapZoomLabel');
+  if (label && sideViewOn) label.textContent = `${Math.round(cloudZoom * 100)}%`;
+}
+function zoomCloudAt(newZoom, cx, cy){  // cx/cy: viewport-relative point that should stay put
+  newZoom = Math.max(1, Math.min(6, newZoom));
+  const s0 = cloudFit * cloudZoom, s1 = cloudFit * newZoom;
+  cloudPanX = cx - (cx - cloudPanX) * s1 / s0; cloudPanY = cy - (cy - cloudPanY) * s1 / s0;
+  cloudZoom = newZoom; applyCloudTransform();
+}
+function zoomCloud(direction){
+  const levels = [1, 1.5, 2, 3, 4, 6];
+  const index = levels.reduce((best, level, i) => Math.abs(level - cloudZoom) < Math.abs(levels[best] - cloudZoom) ? i : best, 0);
+  const vp = document.getElementById('hobbyViewport');
+  zoomCloudAt(levels[Math.max(0, Math.min(levels.length - 1, index + direction))], vp.clientWidth / 2, vp.clientHeight / 2);
+}
+function resetCloudZoom(){ cloudZoom = 1; applyCloudTransform(); }
+// The map header's −/+/↺ serve whichever is on screen.
+function zoomActive(direction){ sideViewOn ? zoomCloud(direction) : zoomUmap(direction); }
+function resetActiveZoom(){ sideViewOn ? resetCloudZoom() : resetUmapZoom(); }
+function enableCloudPanZoom(vp){
+  if (vp.__panZoom) return; vp.__panZoom = true;
+  const pointers = new Map(); let drag = null, pinch = null;
+  vp.addEventListener('wheel', event => {
+    event.preventDefault();
+    const box = vp.getBoundingClientRect();
+    zoomCloudAt(cloudZoom * Math.exp(-event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.0015)), event.clientX - box.left, event.clientY - box.top);
+  }, {passive: false});
+  vp.onpointerdown = event => {
+    if (event.button !== undefined && event.button !== 0) return;
+    cloudDragMoved = false;
+    pointers.set(event.pointerId, {x: event.clientX, y: event.clientY});
+    if (pointers.size === 1) drag = {x: event.clientX, y: event.clientY, panX: cloudPanX, panY: cloudPanY};
+    else if (pointers.size === 2){
+      drag = null; cloudDragMoved = true;
+      const [a, b] = [...pointers.values()];
+      pinch = {distance: Math.hypot(b.x - a.x, b.y - a.y), zoom: cloudZoom};
+    }
+    try { vp.setPointerCapture(event.pointerId); } catch (_) {}  // synthetic events have no active pointer
+    vp.classList.add('dragging');
+  };
+  vp.onpointermove = event => {
+    const p = pointers.get(event.pointerId); if (!p) return;
+    p.x = event.clientX; p.y = event.clientY;
+    if (pinch && pointers.size === 2){
+      const [a, b] = [...pointers.values()], box = vp.getBoundingClientRect();
+      zoomCloudAt(pinch.zoom * Math.hypot(b.x - a.x, b.y - a.y) / pinch.distance, (a.x + b.x) / 2 - box.left, (a.y + b.y) / 2 - box.top);
+    } else if (drag){
+      const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
+      if (Math.hypot(dx, dy) > 4) cloudDragMoved = true;
+      cloudPanX = drag.panX + dx; cloudPanY = drag.panY + dy; applyCloudTransform();
+    }
+  };
+  const end = event => { pointers.delete(event.pointerId); if (pointers.size < 2) pinch = null; if (!pointers.size){ drag = null; vp.classList.remove('dragging'); } };
+  vp.onpointerup = event => {
+    // Pointer capture routes the click here: no movement → the word under the finger.
+    if (!cloudDragMoved && pointers.size === 1){
+      const el = document.elementFromPoint(event.clientX, event.clientY);
+      if (el && el.dataset && el.dataset.term) toggleHobby(el.dataset.term);
+    }
+    end(event);
+  };
+  vp.onpointercancel = end;
+}
+function renderHobbyCloud(){
+  const cloud = document.getElementById('hobbyCloud'), panel = document.getElementById('hobbyPeople'), vp = document.getElementById('hobbyViewport'), stage = document.getElementById('hobbyStage');
+  buildHobbyIndex();
+  const mine = new Set(parseHobbies(currentUser.sideInterest));
+  const ranked = [...HOBBY_INDEX.entries()].map(([t, ps]) => [t, ps.length]).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const shared = ranked.filter(x => x[1] >= HOBBY_CLOUD_MIN_PEOPLE);
+  const terms = (shared.length >= 3 ? shared : ranked).slice(0, HOBBY_CLOUD_MAX);  // too few shared ones yet → show the most-common singles instead of an empty cloud
+  const max = Math.max(1, ...terms.map(x => x[1]));
+  if (window.WordCloud && terms.length){
+    // wordcloud2 layout rendered as positioned <span>s (not canvas) so words stay tappable under CSS zoom.
+    cloud.style.display = 'none'; vp.style.display = '';
+    enableCloudPanZoom(vp);
+    const css = getComputedStyle(document.body), accent = css.getPropertyValue('--purple').trim(), accentText = css.getPropertyValue('--accent-text').trim(), ink = css.getPropertyValue('--ink').trim();
+    const colorOf = key => key === activeHobby ? ink : (mine.has(key) ? accentText : accent);
+    const byLabel = new Map(terms.map(([t]) => [hobbyLabel(t), t]));
+    const key = terms.map(([t, n]) => t + ':' + n).join('|') + '@' + (vp.clientWidth || 300);
+    if (key !== cloudStageKey){
+      cloudStageKey = key;
+      const w = (vp.clientWidth || 300) * CLOUD_SCALE, hgt = (vp.clientHeight || 260) * CLOUD_SCALE * Math.max(1.4, terms.length / 30);  // taller as the list grows
+      stage.style.width = w + 'px'; stage.style.height = hgt + 'px';
+      cloudFit = (vp.clientWidth || 300) / w; cloudZoom = 1; cloudBox = null;
+      // Seed Math.random from the term list so redraws land in the same spots; the library lays out
+      // asynchronously, so the seeded generator stays until 'wordcloudstop'.
+      let seed = terms.reduce((a, [t, n]) => (a * 31 + t.length * n) % 2147483647, 7);
+      Math.random = () => (seed = (seed * 48271) % 2147483647) / 2147483647;
+      stage.addEventListener('wordcloudstop', () => {
+        Math.random = ORIGINAL_RANDOM;
+        let x0 = Infinity, y0 = Infinity, x1 = 0, y1 = 0;
+        stage.querySelectorAll('span').forEach(sp => {
+          const t = byLabel.get(sp.textContent); if (!t) return;
+          sp.dataset.term = t; sp.setAttribute('role', 'button');  // taps are handled on the viewport's pointerup
+          const r = sp.getBoundingClientRect(), st = stage.getBoundingClientRect(), k = st.width / stage.offsetWidth || 1;  // undo the current CSS scale
+          x0 = Math.min(x0, (r.left - st.left) / k); y0 = Math.min(y0, (r.top - st.top) / k); x1 = Math.max(x1, (r.right - st.left) / k); y1 = Math.max(y1, (r.bottom - st.top) / k);
+        });
+        const pad = 8;
+        cloudBox = x1 > x0 ? {x: x0 - pad, y: y0 - pad, w: x1 - x0 + 2 * pad, h: y1 - y0 + 2 * pad} : null;
+        if (cloudBox) cloudFit = Math.min(1, vp.clientWidth / cloudBox.w);  // 100% = the drawn words fit the card's width
+        cloudPanY = -cloudBox.y * cloudFit;  // start at the top of the words, not the top of the (mostly empty) stage
+        applyCloudTransform();
+      }, {once: true});
+      const list = terms.map(([t, n]) => [hobbyLabel(t), n]);
+      WordCloud(stage, {
+        list, fontFamily: 'Nunito, system-ui, sans-serif', fontWeight: '700', shuffle: false, rotateRatio: 0.25, rotationSteps: 2, minRotation: -Math.PI / 2, maxRotation: -Math.PI / 2,
+        gridSize: 8, drawOutOfBound: false, backgroundColor: 'transparent',
+        weightFactor: n => CLOUD_SCALE * (12 + 16 * Math.log2(n) / Math.log2(max + 1)),
+        color: word => colorOf(byLabel.get(word)),
+      });
+    } else {
+      // Same layout: just recolour on tap.
+      stage.querySelectorAll('span').forEach(sp => { if (sp.dataset.term) sp.style.color = colorOf(sp.dataset.term); });
+    }
+    vp.setAttribute('aria-label', 'Hobbies people have added, most shared first: ' + terms.map(([t]) => hobbyLabel(t)).join(', ') + '. Pinch or use the + and - buttons to zoom; tap a hobby to see who shares it.');
+  } else {
+    vp.style.display = 'none'; cloud.style.display = '';
+  }
+  cloud.innerHTML = terms.map(([t, n]) => {
+    const size = 12 + 12 * Math.log2(n) / Math.log2(max + 1);  // 12px for one person, up to ~24px for the most shared
+    return `<button class="hobby${mine.has(t) ? ' mine' : ''}${activeHobby === t ? ' active' : ''}" role="listitem" style="font-size:${size.toFixed(1)}px" data-term="${escapeHtml(t)}">${escapeHtml(hobbyLabel(t))}${n > 1 ? `<small>${n}</small>` : ''}</button>`;
+  }).join('');
+  cloud.querySelectorAll('.hobby').forEach(el => el.onclick = () => toggleHobby(el.dataset.term));
+  if (activeHobby && HOBBY_INDEX.has(activeHobby)){
+    const ps = HOBBY_INDEX.get(activeHobby);
+    panel.style.display = 'block';
+    panel.innerHTML = `<div class="cap" style="margin:8px 4px 6px; font-weight:600;">${ps.length} ${ps.length === 1 ? 'person' : 'people'} · ${escapeHtml(hobbyLabel(activeHobby))}</div>`;
+    ps.forEach(p => {
+      const row = document.createElement('button'); row.className = 'row'; row.style.cssText = 'width:100%; border:1px solid var(--line); font:inherit; cursor:pointer;';
+      row.innerHTML = `<div><div class="rowname">${nameHtml(p)}${personKey(p) === personKey(currentUser) ? ' (you)' : ''}</div><div class="rowsub">${escapeHtml(p.aff || '')}</div></div>`;
+      row.onclick = () => openBubble(p); panel.appendChild(row);
+    });
+  } else { panel.style.display = 'none'; panel.innerHTML = ''; }
+}
+function toggleHobby(t){ activeHobby = activeHobby === t ? null : t; track('open_hobby'); renderHobbyCloud(); }
 
 function deterministicPos(name, cluster){
   const h = hashCode(name);
@@ -976,9 +1273,7 @@ function deterministicPos(name, cluster){
 }
 
 let DATA_LOADED_AT = 0;
-// Freshness: the map data can be up to 30 s behind the server (CloudFront), and a tab left open
-// drifts further. /api/health is never cached, so its generatedAt is the truth; when it's newer
-// than what this page loaded, say so and offer a refresh instead of letting people wonder.
+// Freshness: data files can lag the server (CloudFront) and open tabs drift; /api/health's generatedAt is the truth.
 let SERVER_GENERATED_AT = null;
 let dataReadyResolve;
 const DATA_READY = new Promise(r => { dataReadyResolve = r; });  // resolved once loadRealData() has ATTENDEES
@@ -990,7 +1285,7 @@ function renderEmbeddingsStamp(){
   const el = document.getElementById('embeddingsUpdated');
   if (!EMBEDDINGS_GENERATED_AT){ el.textContent = 'Profile embeddings not generated yet - showing placeholder positions.'; return; }
   const stale = SERVER_GENERATED_AT && SERVER_GENERATED_AT > EMBEDDINGS_GENERATED_AT;  // same ISO format, string compare is fine
-  el.innerHTML = `Profile embeddings last updated: ${escapeHtml(new Date(EMBEDDINGS_GENERATED_AT).toLocaleString())}`
+  el.innerHTML = `Map last updated: ${escapeHtml(new Date(EMBEDDINGS_GENERATED_AT).toLocaleString())}`
     + (stale ? ` &middot; a newer map is ready <button class="linkbtn" onclick="refreshData()">Refresh</button>` : '');
 }
 async function refreshData(){
@@ -1005,23 +1300,22 @@ setInterval(() => { if (!document.hidden) checkFreshness(); }, 60000);
 
 async function loadRealData(background = false){
   try {
-    // cache:'no-cache' forces a revalidation with the server on every page load instead of
-    // silently reusing this browser's own local cache — so a refresh always at least checks
-    // for newer data rather than showing yesterday's. Only applied to the two files that can
-    // actually change mid-conference (new signups/edits get folded into both). CHI's programme
-    // changes too (chi_feed.py re-syncs it from the live feed), so program.csv revalidates as well.
-    // (This only controls THIS browser's local cache; CloudFront's edge cache is a separate layer.)
+    // cache:'no-cache' revalidates this browser's local cache on every load for the files that change
+    // mid-conference; CloudFront's edge cache is a separate layer.
     const noCache = {cache: 'no-cache'};
-    const [authorsText, programText, embeddingsData, sideEmbeddingsData] = await Promise.all([
+    const [authorsText, programText, embeddingsData, sideEmbeddingsData, hobbySim] = await Promise.all([
       fetch('authors.csv', noCache).then(r=>r.text()),
       fetch('program.csv', noCache).then(r=>r.text()),
-      // real embeddings + precomputed top-5 nearest matches, baked offline by embed_umap.py — plain
-      // static JSON, no server/model needed to read it. Missing file just means no real-embeddings yet.
+      // positions + baked top matches from embed_umap.py; missing file = no embeddings yet
       fetch('umap_positions.json', noCache).then(r=> r.ok ? r.json() : null).catch(()=>null),
-      // Side Interests: a second, independent embedding space (see embed_umap.py) — only exists once
-      // at least a couple of people have opted in and a full rebuild has run. Missing = nobody yet.
+      // side space: exists only once a couple of people opted in and a full rebuild ran
       fetch('side_umap_positions.json', noCache).then(r=> r.ok ? r.json() : null).catch(()=>null),
+      fetch('hobby_sim.json', noCache).then(r=> r.ok ? r.json() : null).catch(()=>null),
     ]);
+    HOBBY_SIM = new Map();
+    if (hobbySim && hobbySim.terms && hobbySim.pairs){
+      hobbySim.pairs.forEach(([i, j, s]) => HOBBY_SIM.set(hobbyPairKey(hobbySim.terms[i], hobbySim.terms[j]), s));
+    }
 
     const embByPerson = new Map();
     if (embeddingsData && embeddingsData.people && embeddingsData.people.length){
@@ -1030,8 +1324,7 @@ async function loadRealData(background = false){
       const xMin = Math.min(...xs), xMax = Math.max(...xs), yMin = Math.min(...ys), yMax = Math.max(...ys);
       const scaleX = x => 15 + (x - xMin) / ((xMax - xMin) || 1) * 290;
       const scaleY = y => 15 + (y - yMin) / ((yMax - yMin) || 1) * 160;
-      // Co-authors of one paper share a text and so an exact position; a fixed per-person nudge
-      // (≤1.5 units of a 320-wide map) keeps them from drawing as a single dot.
+      // Co-authors share a text and position; a fixed per-person nudge keeps them from drawing as one dot.
       const nudge = (id, salt) => ((Math.abs(hashCode(id + salt)) % 31) - 15) / 10;
       embeddingsData.people.forEach(p=>{
         embByPerson.set(p.person_id, { x: scaleX(p.x) + nudge(p.person_id, 'x'), y: scaleY(p.y) + nudge(p.person_id, 'y'), topMatches: p.top_matches || [] });
@@ -1048,15 +1341,9 @@ async function loadRealData(background = false){
         sideEmbByPerson.set(p.person_id, { x: scaleX(p.x), y: scaleY(p.y), topMatches: p.top_matches || [] });
       });
     }
-    // program.csv has clean, separate Date/Day/Start Time/End Time/Location/Program URL columns —
-    // prefer those over authors.csv's smashed "Schedule Detail" string wherever we can join to them.
-    // Join key: (author name, presentation title), both lowercased. This is a client-side join over
-    // two already-fetched CSVs — no server/SQL needed, just an in-memory Map (~717 rows, trivial).
+    // Prefer program.csv's clean columns over the "Schedule Detail" string; join on (author name, title), lowercased.
     const programs = parseCSV(programText);
-    // "University Lab Posters" is a standing session slot for departmental posters, not tied to a
-    // specific talk/author the way every other session is — drop it from the program entirely.
-    // Rows with no Presentation ID are conference-wide blocks (receptions, meetings, exhibit hall
-    // hours, award ceremonies) rather than personal presentations — not useful to recommend.
+    // Drop the standing "University Lab Posters" slot and rows with no Presentation ID (receptions, exhibit hours...).
     const talks = programs.filter(p=>p['Presentation Title'] && p['Session Type'] !== 'Registration'
       && p['Session Name'] !== 'University Lab Posters' && p['Presentation ID']);
     const programByKey = new Map();
@@ -1079,22 +1366,14 @@ async function loadRealData(background = false){
     }));
 
     const authors = parseCSV(authorsText).filter(a=>a.Author);
-    // Co-author index (mirrors embed_umap.coauthor_index(), used by server.py and the baked matches — keep in sync):
-    // people sharing a presentation (title+date, any authorship role; Session Chair doesn't
-    // count) are co-authors, and get dropped from each other's ACADEMIC top matches — their
-    // bios describe the same papers, so embeddings rank them at the top, but "go meet your own
-    // labmate" is noise. Hobby matches are never filtered. Built from the pre-join parse, and
-    // before the University Lab Posters filter — lab-poster co-presenters are labmates too.
+    // Co-author index (mirrors embed_umap.coauthor_index(); keep in sync): people sharing a presentation are dropped
+    // from each other's academic matches ("go meet your labmate" is noise). Hobby matches are never filtered.
     const presGroups = new Map();
     ATTENDEES = authors.map(a=>{
-      // s_profile is the curated "**Headline**\nBody" bio, rendered with real bold by renderBio()
-      // — see openBubble(). Interest Profile is the older plain-text field, kept as a fallback.
+      // s_profile is the curated **Headline** bio (renderBio()); Interest Profile is the fallback
       const bio = a['s_profile'] || a['Interest Profile'] || a['Presentation Titles'] || 'No profile on file.';
       const cluster = classify(bio);
-      // "Schedule Detail" still carries each person's own ROLE on a presentation (Co-Author, Presenting
-      // Author, ...), which program.csv doesn't have per-person — so parse it for that, but replace the
-      // date/time/location/title/link with the program.csv row when the join finds one (it does for
-      // ~94% of presentations; the rest quietly fall back to the Schedule Detail parse, no link).
+      // Schedule Detail still carries each person's own role; the program.csv row replaces the rest when the join finds one.
       const parsedPres = (a['Schedule Detail']||'').split('|').map(s=>s.trim()).filter(Boolean)
         .map(entry => parseScheduleDetail(entry))
         .filter(Boolean);
@@ -1124,15 +1403,11 @@ async function loadRealData(background = false){
       return {
         personId: a['Person ID'], name: (a.Author||'').trim(), aff: (a.Affiliation||'').trim(),
         bio,
-        // Optional non-academic "side interests" text — the Side Interests view's own bio-like
-        // field. Blank for most people (it's opt-in); see embed_umap.py's side_text()/SIDE_SPACE.
+        // opt-in side-interest text for the Hobby view
         sideInterest: (a['Side Interest']||'').trim(),
-        // Internal-only tag (see CLAUDE.md) that powers Student View's map/match filtering —
-        // never rendered as a badge or label anywhere in the UI.
+        // internal tag for Student View filtering; never rendered
         isStudent: (a['Is Student']||'').trim() === '1',
-        // Set by embed_umap.py's materialize_db_edits() for every DB profile row: the person
-        // claimed/created this profile themselves, so they're attending. Shown as a soft circle
-        // after the name (nameHtml()), explained in the FAQ.
+        // set by materialize_db_edits() for DB rows: the person claimed this profile (circle after the name)
         claimed: (a['Claimed']||'').trim() === '1',
         presentations,
         cluster, ...(emb ? { x: emb.x, y: emb.y } : deterministicPos(a.Author, cluster)),
@@ -1148,10 +1423,7 @@ async function loadRealData(background = false){
         ids.forEach(other => { if (other !== id) COAUTHORS.get(id).add(other); });
       });
     });
-    // split multi-affiliation rows ("Aptima, Inc.; Arizona State University") into separate options
-    // ponytail: light whitespace/hyphen cleanup only — near-duplicate spellings (e.g. "Aptima, Inc" vs
-    // "Aptima, Inc.", "University of Wisconsin" vs "...-Madison") still fork; fix with a canonical
-    // institution list if that becomes a real problem
+    // split multi-affiliation rows into separate options; light cleanup only, near-duplicate spellings still fork
     AFFILIATIONS = [...new Set(
       authors.flatMap(a => a.Affiliation.split(';'))
         .map(s => s.trim().replace(/\s*-\s*/g,'-').replace(/\s+/g,' '))
@@ -1159,8 +1431,7 @@ async function loadRealData(background = false){
     )].sort();
     renderAffOptions();
     DATA_LOADED_AT = Date.now();
-    // A returning localStorage user can reach Home before the CSV/embedding
-    // requests finish. Hydrate them and redraw once the real projection arrives.
+    // A returning user can reach Home before the fetches finish: hydrate and redraw once they land.
     if (currentUser && document.querySelector('[data-screen="home"]').classList.contains('active')){
       const onFile = ATTENDEES.find(p=>personKey(p)===personKey(currentUser));
       if (onFile) currentUser = {...onFile, ...currentUser, x:onFile.x, y:onFile.y, topMatches:onFile.topMatches, sideX:onFile.sideX, sideY:onFile.sideY, sideTopMatches:onFile.sideTopMatches};
@@ -1169,9 +1440,7 @@ async function loadRealData(background = false){
     checkFreshness();
     dataReadyResolve();
   } catch(err){
-    // No fictional fallback data — ATTENDEES/LECTURES just stay empty. This is a real, total
-    // failure to load the app (not the normal "no data yet" state), so say so plainly instead
-    // of leaving people staring at a silently empty home screen, and let the authors know.
+    // Total failure to load: say so plainly instead of a silently empty Home.
     console.warn('Could not load CHI programme data.', err);
     if (background) return;  // a failed refresh keeps the data already on screen
     show('loaderror');
@@ -1179,8 +1448,7 @@ async function loadRealData(background = false){
   }
 }
 loadRealData();
-// Rooms and times change during the conference and phones keep the tab open for days, so refetch
-// when the app comes back to the foreground with data older than 10 minutes.
+// Rooms and times change mid-conference and tabs stay open for days: refetch on foreground if older than 10 min.
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && DATA_LOADED_AT && Date.now() - DATA_LOADED_AT > 10*60*1000) loadRealData(true);
 });
@@ -1189,7 +1457,17 @@ document.addEventListener('visibilitychange', () => {
 function show(name){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
   document.querySelector(`.screen[data-screen="${name}"]`).classList.add('active');
+  if (name === 'keyin') syncKeyinReady();
 }
+// The key-in form stays locked until the attendee list has downloaded, so no lookup can miss. Unlocks itself.
+function syncKeyinReady(){
+  const ready = ATTENDEES.length > 0;
+  for (const id of ['inName', 'inAff', 'findBtn']) document.getElementById(id).disabled = !ready;
+  const note = document.getElementById('keyinNote');
+  if (!ready){ note.textContent = 'Loading the attendee list… one moment.'; note.style.display = 'block'; }
+  else if (note.textContent.startsWith('Loading the attendee list')) note.style.display = 'none';
+}
+DATA_READY.then(syncKeyinReady);
 
 async function goSplashContinue(){
   const cached = localStorage.getItem(CACHE_KEY);
@@ -1224,11 +1502,7 @@ function restoreLocalProfileOnLoad(){
   show('home');
   if (localStorage.getItem(PENDING_PUBLISH_KEY)) setSyncNotice("Your last profile edit hasn't reached the server yet - retrying…");
   retryPendingPublish();
-  // This can run before the CSV/embedding fetch in loadRealData() resolves, while ATTENDEES
-  // is still empty. Rendering then used to show 9 fictional placeholder people (Sarah Chen,
-  // Marcus Webb, ...) on a real user's map on every refresh, which read as broken, not fast
-  // — so skip the render entirely until real data has landed. loadRealData()'s own
-  // post-fetch hook re-renders Home once it does (usually well under a second).
+  // Can run before loadRealData() resolves: skip the render until real data lands (it re-renders Home then).
   if (ATTENDEES.length) {
     try { renderHome(); } catch (_) { /* recovered by loadRealData() shortly after */ }
   } else {
@@ -1268,12 +1542,11 @@ function renderSuggestList(candidates, subText){
       <div><div class="rowname">${nameHtml(c)}</div><div class="rowsub">${escapeHtml(c.aff)}</div></div>`;
     list.appendChild(row);
   });
+  track('lookup_suggested');
   show('typo');
 }
 
-// true if typedAff is (loosely) one of the person's on-file affiliations — people can be
-// affiliated with more than one org ("Aptima, Inc.; Arizona State University"), and typing
-// just one of them still counts as a match
+// true if typedAff loosely matches one of the person's (possibly several) affiliations
 function normalizeAff(s){
   return s.trim().toLowerCase().replace(/\s*-\s*/g,'-').replace(/\s+/g,' ');
 }
@@ -1308,36 +1581,23 @@ function affMatches(person, typedAff){
 }
 
 // ---------- structured name matching: surname + a given name ----------
-// "Alicia Cheng" typed for `Xiaoxuan "Alicia" Cheng` on file, "Sung Ahn" for Sung Hee Ahn, "J. Lee" for
-// John D. Lee, "Jones" or "Smith-Jones" for a married/hyphenated surname: none of these are within a
-// few edits of the whole string, so the Levenshtein layer in lookup() misses them and the person is
-// routed to "create new profile" — which is how a real attendee ended up with a duplicate on
-// 2026-09-03. ~12% of attendees have three or more name words or a middle initial, so this is the
-// common case, not the nickname edge case. Rule: the SURNAME must match (the last word, either half
-// of a hyphenated one, or the second-to-last word for compound surnames) AND at least one GIVEN name
-// must match (any other word, or a nickname in quotes/parentheses; exact, initial, prefix, or one
-// edit). Deliberately generous, per the owner: a wrong suggestion costs one tap on "That's not me";
-// a missed match creates a duplicate attendee that persists in the data.
+// Nicknames, middle names, initials and hyphenated surnames defeat whole-string Levenshtein. Rule: the SURNAME must
+// match (last word, either half of a hyphen, or second-to-last for compound surnames) AND at least one GIVEN name
+// (exact, initial, prefix, or one edit). Deliberately generous: a wrong suggestion costs one tap, a miss creates a duplicate.
 function hyphenParts(w){ return w.includes('-') ? [w, ...w.split('-').filter(Boolean)] : [w]; }
 function nameParts(name){
   const nick = [...name.matchAll(/["\u201c\u201d(]\s*([^"\u201c\u201d()]+?)\s*["\u201c\u201d)]/g)].map(m => m[1]);
   const clean = str => str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9\s-]/g, ' ');
-  // Credentials/suffixes ride along in some on-file names ("Michael Byrne, Ph.D.") — drop them so the
-  // real surname is the last word.
-  // Only unambiguous forms: anything after a comma (", Ph.D."), or a punctuated/roman suffix after a
-  // space (" Jr.", " III"). A bare trailing "Md" is NOT stripped — it's a real given name (Md Kaiser
-  // Hamid Munna) when someone types family-name-first.
+  // Drop unambiguous credentials/suffixes (", Ph.D.", " Jr.", " III") so the surname is the last word.
+  // A bare trailing "Md" is a real given name when typed family-name-first, so it stays.
   const noSuffix = name.replace(/,\s*(ph\.?\s?d\.?|m\.?d\.?|dr\.?|jr\.?|sr\.?|ii|iii|iv)\.?\s*$/i, '')
                        .replace(/\s+(ph\.?\s?d\.|m\.d\.|jr\.|sr\.|ii|iii|iv)\s*$/i, '');
   const words = clean(noSuffix.replace(/["\u201c\u201d(][^"\u201c\u201d()]*["\u201c\u201d)]/g, ' ')).split(/\s+/).filter(Boolean);
   const surname = new Set(words.slice(-1).flatMap(hyphenParts));
   if (words.length >= 3){
-    // Compound / double surnames ("Harris Adamson", "Munoz Gomez Andrade" — Spanish paternal surname is
-    // the SECOND word, and people often use it alone): every word after the first counts as a possible
-    // surname, except one-letter initials ("E.B. Floersch" → "e b floersch"), which are given names.
+    // Compound surnames ("Munoz Gomez Andrade"): every word after the first may be the surname, except one-letter initials.
     words.slice(1, -1).forEach(w => { if (w.length > 1) hyphenParts(w).forEach(p => surname.add(p)); });
-    // Particles typed joined or split ("Vanderberg" ~ "van der Berg", "de Oliveira Faria" ~ "deoliveirafaria"):
-    // also compare the trailing words run together.
+    // Particles joined or split ("Vanderberg" ~ "van der Berg"): also compare the trailing words run together.
     surname.add(words.slice(1).join(''));
     surname.add(words.slice(-2).join(''));
   }
@@ -1363,12 +1623,8 @@ function nameStructureMatches(typed, onFile){
       && setsClose(new Set(t.words.slice(1).flatMap(hyphenParts)), f.given);
 }
 
-// A typed given name that matches EXACTLY (not fuzzily) is strong evidence on its own when it's rare:
-// "Vianney Rere" should still suggest Vianney Renata (the only Vianney on the list) even though
-// "Rere" is four edits from "Renata" and the typed affiliation is wrong. Rule: exact given-name match
-// AND (the name is shared by at most GIVEN_RARE_MAX attendees, OR the typed affiliation matches).
-// "John Rere" at Wisconsin therefore lists the Johns at Wisconsin; "John Rere" alone lists nobody
-// extra — John is common and there's no second signal.
+// An EXACT given-name match is evidence on its own when the name is rare (≤ GIVEN_RARE_MAX attendees) or the
+// typed affiliation matches; a common given name alone suggests nobody extra.
 const GIVEN_RARE_MAX = 2;
 let GIVEN_COUNTS = null;  // given-name token -> number of attendees carrying it; built on first use
 function givenCounts(){
@@ -1378,11 +1634,8 @@ function givenCounts(){
   }
   return GIVEN_COUNTS;
 }
-// Mirror image of the given-name rules, for people whose FIRST name is what changed (a nickname or
-// preferred name that isn't on file, a legal name change, autocorrect on the first name): an exact
-// SURNAME match suggests when that surname is shared by at most SURNAME_RARE_MAX attendees, or when
-// the typed affiliation matches. No nickname table anywhere — the owner's rule is that we never
-// guess what someone goes by; surname + affiliation is evidence they gave us.
+// Mirror for people whose FIRST name changed (nickname, legal change): an exact surname match suggests when the
+// surname is rare (≤ SURNAME_RARE_MAX) or the affiliation matches. No nickname table: we never guess what someone goes by.
 const SURNAME_RARE_MAX = 2;
 let SURNAME_COUNTS = null;  // surname token -> number of attendees whose surname set contains it
 function surnameCounts(){
@@ -1408,10 +1661,8 @@ function lookup(){
   const name = document.getElementById('inName').value.trim();
   const aff = document.getElementById('inAff').value.trim();
   if(!name){ document.getElementById('inName').focus(); return; }
-  // Affiliation is required (2026-09-03): an exact name match with a blank affiliation used to open
-  // that person's review screen directly — with 23 Chens and 21 Kims on file, a hasty "OK, that's me"
-  // could claim (and edit) someone else's profile. With an affiliation always present, an exact match
-  // either also matches the affiliation (open the review screen) or asks "is this you?" first.
+  // Affiliation is required: an exact name match alone must not open someone's review screen (23 Chens on file);
+  // it either also matches the affiliation or asks "is this you?" first.
   const note = document.getElementById('keyinNote');
   if(!aff){
     note.textContent = 'Please add your affiliation.';
@@ -1419,28 +1670,19 @@ function lookup(){
     document.getElementById('inAff').focus();
     return;
   }
-  // The attendee list is still downloading (or failed): matching against an empty list would
-  // send a real attendee straight to "create new profile" and make a duplicate.
-  if(!ATTENDEES.length){
-    note.textContent = 'Loading the attendee list… one moment.';
-    note.style.display = 'block';
-    // Nothing for them to do: the fetch is already in flight. Finish their lookup when it lands
-    // (a failed load shows the loaderror screen instead, so this never fires on failure).
-    DATA_READY.then(() => { if (document.querySelector('[data-screen="keyin"]').classList.contains('active')) lookup(); });
-    return;
-  }
+  if(!ATTENDEES.length) return;  // form is locked until the list has loaded (syncKeyinReady); belt and braces
 
   const nameMatches = ATTENDEES.filter(a => a.name.toLowerCase() === name.toLowerCase());
 
   if (nameMatches.length){
     const affFiltered = aff ? nameMatches.filter(a => affMatches(a, aff)) : nameMatches;
     if (affFiltered.length === 1){
+      track('lookup_found');
       showProfile(affFiltered[0], true);
       return;
     }
     if (nameMatches.length === 1){
-      // one person has this name, but the affiliation you typed doesn't match what's on file
-      // (could be stale data, a job change, or a typo) — confirm instead of guessing
+      // one person has this name but the typed affiliation differs: confirm instead of guessing
       renderSuggestList(nameMatches, `We found "${name}" on file, but not at that affiliation. Is this you?`);
       return;
     }
@@ -1449,10 +1691,7 @@ function lookup(){
     return;
   }
 
-  // Typing just a first (or last) name is valid too — "Vianney" should suggest
-  // "Vianney Renata" even though the full-string edit distance to it is large.
-  // Match against each whitespace-separated token of the name on file, not
-  // just the name as a whole.
+  // A first or last name alone is valid too: match each token of the name on file, not just the whole.
   const nameLower = name.toLowerCase();
   const tokenMatches = ATTENDEES.filter(a =>
     a.name.toLowerCase().split(/\s+/).some(t => t === nameLower || (t.length > 2 && levenshtein(t, nameLower) <= 1)));
@@ -1463,9 +1702,7 @@ function lookup(){
     .sort((x,y)=> x.d - y.d)
     .map(({a})=>a);
 
-  // Structured surname+given-name matches come first (see nameStructureMatches above), with the
-  // ones at the typed affiliation ahead of the rest — "J. Lee" alone is a dozen people, but
-  // "J. Lee" + "Wisconsin" is usually one.
+  // Structured matches first, those at the typed affiliation ahead of the rest.
   const structured = ATTENDEES.filter(a => {
     if (nameStructureMatches(name, a.name)) return true;
     const g = givenNameExact(name, a.name);
@@ -1513,60 +1750,48 @@ function stopDraftingAnimation(){
   draftingInterval = null;
 }
 
-// A brand-new signup only ever reaches here with empty fields (this fires the moment they're
-// routed to "create new profile," before the form is even shown) — but if they somehow already
-// typed something first, still offer the draft rather than silently overwriting their own words.
+// Fires the moment someone is routed to "create new profile"; if they already typed, still offer the draft.
 function offerDraftedBio(bio){
   const bioEl = document.getElementById('inBio');
   const hasExisting = bioEl.value.trim();
-  // The drafting screen runs before the form is ever shown, so the box is virtually always empty
-  // here and the draft just lands in it. In the rare case someone already typed, keep their words —
-  // no dialog, no sheet (a prompt here was judged not worth the interruption).
+  // The box is virtually always empty here; if someone already typed, keep their words, no dialog.
   if (!hasExisting) bioEl.value = bio;
 }
 
-// Used whenever no real draft comes back (no confident web-search match, no key configured,
-// rate-limited, network hiccup — all the same "nothing to offer" case from here). Deliberately
-// reads as an obvious placeholder rather than a finished-looking bio: the whole point of drafting
-// something is to get people to personalize it, and a bunch of attendees left with the exact same
-// text would also make their embeddings — and therefore their matches — look identical to each
-// other instead of reflecting what they actually work on.
-const FALLBACK_BIO = "New to the directory - replace this with a few sentences about what you actually work on.";
+// No draft: the box stays empty with hint text and "Build my profile" stays disabled until they type
+// (a pre-filled sentence once got published verbatim, and identical bios embed identically).
+function syncBuildReady(){
+  document.getElementById('buildBtn').disabled = !document.getElementById('inBio').value.trim();
+}
 
 async function goCreateNewProfile(){
+  track('lookup_none');
   const name = document.getElementById('inName').value.trim();
   const aff = document.getElementById('inAff').value.trim();
   show('drafting');
   startDraftingAnimation();
   let draftedBio = null;
   try {
-    // Client-side timeout as a backstop on top of the server's own — the loading screen must
-    // never hang forever even if something server-side misbehaves.
+    // client-side timeout so the loading screen can never hang
     const data = await Promise.race([
       api('/api/draft-bio', {method:'POST', body: JSON.stringify({name, aff})}),
       new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 35000)),
     ]);
     draftedBio = data && data.bio ? data.bio : null;
-  } catch (_) { /* no key configured, rate-limited, no confident match, network hiccup — all
-    equally "no draft available," never block signup on it */ }
+  } catch (_) { /* no draft for any reason: never block signup on it */ }
   stopDraftingAnimation();
   show('newattendee');
-  document.getElementById('draftNote').style.display = 'none';
-  if (draftedBio) {
-    offerDraftedBio(draftedBio);
-  } else if (!document.getElementById('inBio').value.trim()){
-    // Unlike a real draft, a generic placeholder isn't worth interrupting someone who already
-    // started typing their own bio to ask "use this instead?" — only fill it in when blank.
-    document.getElementById('inBio').value = FALLBACK_BIO;
-    document.getElementById('draftNote').style.display = 'block';  // tell them why the box holds a placeholder
-  }
+  if (draftedBio) offerDraftedBio(draftedBio);
+  else document.getElementById('inBio').placeholder = "We couldn't find anything about you online - tell us in a few sentences what you work on";
+  syncBuildReady();
 }
 
 function createNewProfile(){
   const name = document.getElementById('inName').value.trim() || 'New Attendee';
   const aff = document.getElementById('inAff').value.trim();
   const sideInterest = document.getElementById('inSideInterest').value.trim();
-  const fullBio = document.getElementById('inBio').value.trim() || 'No bio yet.';
+  const fullBio = document.getElementById('inBio').value.trim();
+  if (!fullBio){ document.getElementById('inBio').focus(); return; }  // button is disabled anyway; belt and braces
   const cluster = classify(fullBio);
   const profile = { name, aff, cluster, bio: fullBio, sideInterest, ...deterministicPos(name, cluster) };
   showProfile(profile, false);
@@ -1575,20 +1800,17 @@ function createNewProfile(){
 function autosizeBio(){
   const ta = document.getElementById('profBio');
   const view = document.getElementById('profBioView');
-  // Side-interest field: the "e.g. fountain pens, ..." prompt and the "optional" hint are
-  // edit-mode affordances. While just reviewing, an empty field reads "None" and the hint is hidden.
+  // Side-interest prompt/hint are edit-mode affordances; while reviewing an empty field reads "None".
   const side = document.getElementById('profSideInterest');
   side.placeholder = ta.readOnly ? 'None' : 'e.g. fountain pens, mechanical keyboards, running';
   document.getElementById('profSideHint').style.display = ta.readOnly ? 'none' : 'inline';
   if (ta.readOnly){
-    // View mode: show the rendered (real bold) version instead of the raw textarea, so
-    // "**word**" doesn't sit there as literal asterisks while just reviewing/confirming.
+    // view mode: rendered bold instead of raw ** markup
     view.innerHTML = renderBio(ta.value);
     view.style.display = 'block';
     ta.style.display = 'none';
   } else {
-    // Edit mode: back to the raw textarea, since you edit the ** markup itself, not a
-    // rendered preview.
+    // edit mode: the raw textarea
     view.style.display = 'none';
     ta.style.display = 'block';
     ta.style.height = '110px';
@@ -1598,26 +1820,33 @@ function autosizeBio(){
 let editSnapshot = null;
 
 function renderProfileActions(editing){
+  // While claiming there is ONE button, "Yes, that's me"; editing moves to the after-claim questions.
+  const claiming = CLAIMING_EXISTING;  // a new profile keeps Edit + "OK, that's me": they just typed it all
   document.getElementById('profileActions').innerHTML = editing
     ? `<button class="btn danger" style="flex:1" onclick="cancelEdit()">Cancel</button>
        <button class="btn success" style="flex:1" onclick="saveEdit()">OK</button>`
+    : claiming
+    ? `<button class="btn" style="flex:1" onclick="confirmProfile()">Yes, that's me</button>`
     : `<button class="btn secondary" style="flex:1" onclick="editProfile()">Edit</button>
        <button class="btn" style="flex:1" onclick="confirmProfile()">OK, that's me</button>`;
 }
 
+let CLAIMING_EXISTING = false;  // set by showProfile(): claiming an attendee who is already in the programme
 function showProfile(person, found, claiming=true){
   currentUser = person;
+  CLAIMING_EXISTING = claiming && found && !!person.personId;
   document.getElementById('profAvatar').textContent = initials(person.name);
   document.getElementById('profName').value = person.name;
   document.getElementById('profAff').value = person.aff;
   document.getElementById('profBio').value = person.bio;
   document.getElementById('profSideInterest').value = person.sideInterest || '';
   document.getElementById('profIsStudent').checked = !!person.isStudent;
-  // The "I'm a student" question is only answerable while claiming a profile (first
-  // lookup/signup), not from a later "Edit profile" on an already-claimed one — otherwise
-  // people could flip Student View access back and forth at will. Changing it later means
-  // "Not you? Reset" and claiming the profile again, which is deliberate friction.
+  // "I'm a student" is only answerable while claiming, not from a later edit, so Student View access
+  // can't be flipped at will; changing it means Reset and claim again.
   document.getElementById('studentQuestionRow').style.display = claiming ? 'flex' : 'none';
+  // The hobby field gets its own question screen after a claim; a new profile shows what they typed.
+  const side = document.getElementById('profSideInterest');
+  side.style.display = side.previousElementSibling.style.display = CLAIMING_EXISTING ? 'none' : '';
   document.getElementById('profName').readOnly = true;
   document.getElementById('profAff').readOnly = true;
   document.getElementById('profBio').readOnly = true;
@@ -1660,16 +1889,15 @@ function cancelEdit(){
 }
 
 async function saveEdit(){
-  // isStudent is deliberately left out here when the question is hidden (editing an
-  // already-claimed profile) — see showProfile()'s "claiming" note. sideInterest, unlike
-  // isStudent, is always editable, so it's included unconditionally.
+  track('edit');
+  // isStudent is left out when the question is hidden (see showProfile()); sideInterest is always editable.
   const claiming = document.getElementById('studentQuestionRow').style.display !== 'none';
   currentUser = {
     ...currentUser,
     name: document.getElementById('profName').value.trim(),
     aff: document.getElementById('profAff').value.trim(),
     bio: document.getElementById('profBio').value.trim(),
-    sideInterest: document.getElementById('profSideInterest').value.trim(),
+    sideInterest: hobbiesCommaSeparated(document.getElementById('profSideInterest').value),
     ...(claiming ? {isStudent: document.getElementById('profIsStudent').checked} : {}),
   };
   document.getElementById('profAvatar').textContent = initials(currentUser.name);
@@ -1683,22 +1911,19 @@ async function saveEdit(){
   const textChanged = currentUser.bio !== (editSnapshot.bio || '').trim()
     || currentUser.sideInterest !== (editSnapshot.sideInterest || '').trim();
   if (currentUser.personId && textChanged){
-    // Already published, and the text that gets embedded changed: re-place, and wait for it.
-    // (Name/affiliation-only edits don't move the dot, so they publish quietly as before.)
+    // Already published and the embedded text changed: re-place and wait. Name/affiliation-only edits publish quietly.
     const prev = await placementStamp();
+    RETURN_HOME_AFTER_SAVE = false;
     if (await publishProfileEdit()) return waitForPlacement('update', prev);
     return;
   }
   publishProfileEdit();
+  if (RETURN_HOME_AFTER_SAVE){ RETURN_HOME_AFTER_SAVE = false; renderHome(); show('home'); }  // came from the after-claim bio question
 }
 
 async function confirmProfile(){
-  // The student checkbox (unlike name/aff/bio) is answerable straight from the "OK, that's
-  // me" confirm screen without clicking Edit first — so a plain confirm still needs to reach
-  // the API when that answer changed, even though it otherwise only publishes brand-new
-  // profiles (an unchanged confirm shouldn't queue a pointless re-embed). Only true while
-  // claiming, though — see showProfile()'s "claiming" note; the row is hidden otherwise, so
-  // its checked state is stale and must not override what's on file.
+  // The student checkbox is answerable from the confirm screen without Edit, so a plain confirm must reach the API
+  // when it changed, but only while claiming (the row is hidden otherwise and its state is stale).
   const claiming = document.getElementById('studentQuestionRow').style.display !== 'none';
   const isStudentNow = claiming ? document.getElementById('profIsStudent').checked : !!currentUser.isStudent;
   const isStudentChanged = claiming && isStudentNow !== !!currentUser.isStudent;
@@ -1707,24 +1932,65 @@ async function confirmProfile(){
     name: document.getElementById('profName').value.trim(),
     aff: document.getElementById('profAff').value.trim(),
     bio: document.getElementById('profBio').value.trim(),
-    sideInterest: document.getElementById('profSideInterest').value.trim(),
+    sideInterest: hobbiesCommaSeparated(document.getElementById('profSideInterest').value),
     isStudent: isStudentNow,
   };
   persistLocalProfile();
-  if (!currentUser.personId || isStudentChanged){
+  // A claim is published too: the DB row marks the profile claimed; the re-embed of an unchanged bio leaves the dot put.
+  if (!currentUser.personId || claiming){
     const isNew = !currentUser.personId;
+    track(isNew ? 'created' : 'claimed');
     const ok = await publishProfileEdit();
-    if (ok && isNew) return waitForPlacement('create', null);  // a student-flag change alone doesn't move the dot
+    if (ok && isNew) return waitForPlacement('create', null);  // a claim or student-flag change alone doesn't move the dot
+    if (claiming && !isNew) return openAskHobby();  // existing attendee just claimed: two optional questions, then Home
   }
   renderHome();
   show('home');
 }
 
+// ---------- after-claim questions ----------
+// Only after claiming an existing programme entry; the placement job runs underneath.
+function openAskHobby(){
+  document.getElementById('askHobbyTitle').textContent = `Welcome, ${(currentUser.name || '').split(' ')[0]}! 🫛`;
+  document.getElementById('askHobby').value = currentUser.sideInterest || '';
+  show('askhobby');
+}
+function askHobbyContinue(){
+  const text = document.getElementById('askHobby').value.trim();
+  if (text && hobbiesCommaSeparated(text) !== (currentUser.sideInterest || '')){
+    currentUser = {...currentUser, sideInterest: hobbiesCommaSeparated(text)};
+    persistLocalProfile();
+    track('askhobby_added');
+    publishProfileEdit();  // one more quick placement job; no need to wait on it here
+  } else track('askhobby_skip');
+  openAskBio();
+}
+function askHobbySkip(){ track('askhobby_skip'); openAskBio(); }
+function openAskBio(){
+  const box = document.getElementById('askBioView');
+  box.innerHTML = renderBio(currentUser.bio || ''); box.scrollTop = 0;
+  show('askbio');
+  requestAnimationFrame(bioScrollHint);
+}
+function bioScrollHint(){
+  const box = document.getElementById('askBioView');
+  const more = box.scrollHeight - box.clientHeight - box.scrollTop > 8;  // anything still below the fold?
+  document.getElementById('askBioMore').classList.toggle('off', !more);
+}
+function addMyHobbies(){
+  track('askhobby_added');  // same funnel as the after-claim question: they chose to add hobbies
+  editFromHome();
+  const el = document.getElementById('profSideInterest');
+  el.scrollIntoView({block: 'center'}); el.focus();
+}
+function askBioOk(){ track('askbio_ok'); renderHome(); show('home'); }
+let RETURN_HOME_AFTER_SAVE = false;
+function askBioEdit(){ track('askbio_edit'); RETURN_HOME_AFTER_SAVE = true; editFromHome(); }  // existing edit screen; OK there lands on Home
+
 function resetCache(){
   localStorage.removeItem(CACHE_KEY);
   currentUser = null;
-  // Reset can be initiated from the profile bubble; remove that modal before
-  // returning to the splash screen so it cannot remain over the new screen.
+  // Reset can start from the profile bubble; remove that modal before returning to the splash screen.
   closeOverlay();
   closeSavedOverlay();
   document.getElementById('inName').value = '';
@@ -1732,8 +1998,8 @@ function resetCache(){
   show('splash');
 }
 
-// ---------- heuristic "embedding similarity" stand-in ----------
-// ponytail: keyword overlap, not a real embedding — swap in vector similarity once profiles are actually embedded
+// ---------- heuristic similarity stand-in ----------
+// keyword overlap, used only for people not yet embedded
 const STOPWORDS = new Set(['about','after','also','among','applies','applying','application','applications','area','areas','based','both','broader','centers','combining','considerations','context','contexts','could','design','develops','field','focuses','framework','frameworks','from','further','however','including','into','methods','more','other','points','presentation','recent','related','search','single','studies','study','such','suggests','than','that','their','these','this','through','throughline','using','which','while','with','within','work','works']);
 function keywords(text){
   return new Set((text||'').toLowerCase().match(/[a-z]{5,}/g)?.filter(w=>!STOPWORDS.has(w)) || []);
@@ -1742,8 +2008,7 @@ function matchScore(a, b, field='bio'){
   const kb = keywords(b[field]);
   let shared = 0;
   keywords(a[field]).forEach(w=>{ if (kb.has(w)) shared++; });
-  // The cluster heuristic is bio-specific (research-area classify()) — meaningless for the
-  // side-interest field, so it only applies to the default main-space score.
+  // the research-area cluster heuristic is meaningless for the side-interest field
   const clusterBonus = field === 'bio' && a.cluster === b.cluster ? 18 : 0;
   return Math.min(98, 42 + shared*7 + clusterBonus);
 }
@@ -1766,8 +2031,7 @@ function zoomUmap(direction){
 function resetUmapZoom(){ umapZoom = 1; umapPanX = 0; umapPanY = 0; applyUmapViewBox(); }
 function focusPersonOnMap(person){
   highlightedPersonKey = personKey(person);
-  // Centre a comfortable close-up around the selected attendee without changing
-  // their UMAP position or recalculating the projection.
+  // Centre a close-up on the attendee without changing their position.
   umapZoom = Math.max(umapZoom, 2);
   umapPanX = person.x - 160;
   umapPanY = person.y - 95;
@@ -1778,6 +2042,20 @@ function enableUmapPan(svg){
   let drag = null;
   const pointers = new Map();
   let pinch = null;
+  // Wheel/trackpad zoom, continuous and anchored under the cursor (same formula as pinch).
+  svg.addEventListener('wheel', event=>{
+    event.preventDefault();  // the map eats the scroll while the cursor is over it
+    const box = svg.getBoundingClientRect();
+    const [vx, vy, vw, vh] = svg.getAttribute('viewBox').split(' ').map(Number);
+    const focusX = vx + (event.clientX-box.left) * vw / box.width;
+    const focusY = vy + (event.clientY-box.top) * vh / box.height;
+    const factor = Math.exp(-event.deltaY * (event.deltaMode === 1 ? 0.05 : 0.0015));  // lines vs pixels
+    umapZoom = Math.max(.75, Math.min(12, umapZoom * factor));
+    const width = 320 / umapZoom, height = 190 / umapZoom;
+    umapPanX = focusX - 160 + width/2 - (event.clientX-box.left) * width / box.width;
+    umapPanY = focusY - 95 + height/2 - (event.clientY-box.top) * height / box.height;
+    applyUmapViewBox();
+  }, {passive:false});
 
   function startPinch(){
     const [first, second] = [...pointers.values()];
@@ -1838,8 +2116,7 @@ function enableUmapPan(svg){
   svg.onpointerup = svg.onpointercancel = event=>{
     const wasPinching = Boolean(pinch);
     pointers.delete(event.pointerId);
-    // Pointer capture means pointerup is delivered to the SVG rather than the
-    // original circle. Keep the original attendee from pointerdown instead.
+    // Pointer capture delivers pointerup to the SVG; keep the attendee from pointerdown.
     if (!wasPinching && drag?.person && !drag.moved && personKey(drag.person)!==personKey(currentUser)) openBubble(drag.person);
     drag = null;
     if (pointers.size < 2) pinch = null;
@@ -1851,7 +2128,9 @@ function enableUmapPan(svg){
   };
 }
 async function showMoreMatches(){
+  track('show_more');
   matchVisibleCount += 2;
+  if (sideViewOn){ renderHome(); return; }  // hobby matches are computed in the browser; nothing to fetch
   const available = loadedMatchCandidates ? loadedMatchCandidates.length
     : (sideViewOn ? (currentUser.sideTopMatches||[]).length : (currentUser.topMatches||[]).length);
   if (currentUser.personId && matchVisibleCount > available){
@@ -1859,11 +2138,8 @@ async function showMoreMatches(){
       const offset = loadedMatchCandidates ? loadedMatchCandidates.length : 0;
       const extraParam = sideViewOn ? '&space=side' : (studentViewOn ? '&studentOnly=1' : '');
       const data = await api(`/api/matches?personId=${encodeURIComponent(currentUser.personId)}&offset=${offset}&limit=50${extraParam}`);
-      // A brand-new profile can hit "show more" before its own incremental placement has
-      // finished (still inside the quiet window) — the server has nothing for it yet and
-      // returns an empty first page. Don't let that empty page wipe out the matches already
-      // on screen (the client-side keyword-overlap fallback); just skip this refresh and
-      // try again next time "show more" is clicked.
+      // A brand-new profile can hit "show more" before its placement finished: the server returns an empty
+      // page. Don't let it wipe the fallback matches on screen; try again next click.
       if (data.matches.length || offset) {
         loadedMatchCandidates = offset ? loadedMatchCandidates.concat(data.matches) : data.matches;
         loadedMatchTotal = data.total;
@@ -1879,40 +2155,45 @@ function renderHome(){
   document.getElementById('homeAvatarBtn').textContent = initials(currentUser.name);
   renderEmbeddingsStamp();
 
-  // A profile switch (claim someone else after "Not you? Reset") can leave viewMode pointed at
-  // Students while the new "you" isn't one — the picker wouldn't even offer that option anymore,
-  // so silently fall back rather than get stuck showing a mode you can no longer pick again.
+  // A profile switch can leave viewMode at Students while the new "you" isn't one: fall back silently.
   if (viewMode === 'student' && !currentUser.isStudent){
     viewMode = 'everyone'; studentViewOn = false;
     document.body.classList.remove('student-view');
   }
-  // Single "View" trigger (Everyone / Students / Non-academic) — see openViewModePicker(). One
-  // shared control instead of separate always-visible toggle buttons crowding the topbar.
+  // Single "View" trigger (see openViewModePicker()).
   setViewToggleText();
 
-  // Side Interests is opt-in and usually sparse early on — below SIDE_VIEW_MIN_PEOPLE the map/
-  // matches would be technically renderable but not worth showing yet. Show a "come back later"
-  // placeholder instead, and skip the rest of this function (nothing else to compute for it).
-  const belowSideThreshold = sideViewOn && SIDE_EMBEDDED_COUNT < SIDE_VIEW_MIN_PEOPLE;
+  // Side Interests is opt-in and sparse early on: below SIDE_VIEW_MIN_PEOPLE show a "come back later" placeholder.
+  if (sideViewOn) buildHobbyIndex();
+  // Hobby view is give-to-get: no hobbies of your own → an "Add mine" prompt instead of the cloud.
+  const selfGate = sideViewOn && !parseHobbies(currentUser.sideInterest).length;
+  const belowSideThreshold = sideViewOn && !selfGate && hobbyPeopleCount() < SIDE_VIEW_MIN_PEOPLE;
   document.getElementById('sideViewMinCount').textContent = SIDE_VIEW_MIN_PEOPLE;
+  document.getElementById('sideSelfGate').style.display = selfGate ? 'block' : 'none';
   document.getElementById('sideViewPlaceholder').style.display = belowSideThreshold ? 'block' : 'none';
-  document.getElementById('matchesAndMap').style.display = belowSideThreshold ? 'none' : 'block';
+  document.getElementById('matchesAndMap').style.display = (selfGate || belowSideThreshold) ? 'none' : 'block';
   // No "Top Program" in Side Interests view — it's not CHI-related, so there's nothing to recommend.
   document.getElementById('programSection').style.display = sideViewOn ? 'none' : 'block';
-  if (belowSideThreshold) return;
+  if (selfGate || belowSideThreshold) return;
 
-  // The Hobby map, unlike the academic one, periodically re-shapes itself as more people opt
-  // in (see server.py's periodic_side_refit_check()) — worth saying so here, since someone who
-  // remembers where a dot used to be shouldn't read a later shift as a bug.
+  // The Hobby space re-shapes as people opt in; say so, so a shift isn't read as a bug.
   document.getElementById('mapExplainer').textContent = sideViewOn
-    ? "A map of everyone's non-academic interests - hobbies and quirky stuff, not research. It's not geography, just how alike people's interests are. This map reshapes itself occasionally as more people add their own, so positions may shift over time."
+    ? "Everyone's non-academic interests, bigger when more people share one. Tap a hobby to see who's into it; your own are filled in."
     : "A map of everyone's interests - people working on similar things end up closer together. It's not geography, just how alike people's research focus is.";
   const selfNotice = document.getElementById('sideViewSelfNotice');
-  selfNotice.style.display = (sideViewOn && !Number.isFinite(currentUser.sideX)) ? 'block' : 'none';
+  selfNotice.style.display = (sideViewOn && !parseHobbies(currentUser.sideInterest).length) ? 'block' : 'none';
+  // Hobby view: a cloud of chips replaces the side UMAP.
+  document.querySelector('.umap-card .cap').textContent = sideViewOn ? 'Hobby cloud' : 'Attendee interest map';
+  document.querySelector('.map-controls').style.display = '';  // zoom buttons serve the cloud in Hobby view too
+  document.getElementById('mapStage').style.display = sideViewOn ? 'none' : '';
+  document.getElementById('embeddingsUpdated').style.display = sideViewOn ? 'none' : '';
+  document.getElementById('hobbyCloud').style.display = sideViewOn ? '' : 'none';
+  document.getElementById('hobbyViewport').style.display = sideViewOn ? '' : 'none';
+  if (!sideViewOn) applyUmapViewBox();  // restore the map's own zoom label after Hobby view used it
+  document.getElementById('hobbyPeople').style.display = sideViewOn && activeHobby ? '' : 'none';
+  if (sideViewOn) renderHobbyCloud();
 
-  // UMAP scatter — render every embedded attendee (or, in Student View, only students plus
-  // "you"; in Side Interests view, only whoever has added side-interest text). Half opacity
-  // lets dense areas accumulate visually without turning the map into an opaque block.
+  // UMAP scatter: every embedded attendee (filtered in Student / Side views). Half opacity so dense areas stay readable.
   const svg = document.getElementById('umapSvg');
   svg.innerHTML = '';
   document.getElementById('mapLoading').classList.remove('active');
@@ -1927,19 +2208,14 @@ function renderHome(){
     const isMe = personKey(p) === personKey(currentUser);
     const px = sideViewOn ? p.sideX : p.x, py = sideViewOn ? p.sideY : p.y;
     if (!Number.isFinite(px) || !Number.isFinite(py)){
-      // A profile can reach here without a position (e.g. "you", freshly signed in, before
-      // any embedding has ever placed you). An unset x/y renders the SVG circle at (0,0) —
-      // the map's top-left corner — which reads as a stray, unexplained dot. Give "you" a
-      // deterministic placeholder position so you're still visible in the main/student map;
-      // in Side Interests view there's no fallback position to fake, so just skip "me" too
-      // (the notice above already explains why you're not on this map).
+      // No position yet (e.g. "you" before any placement): give "you" a deterministic placeholder in the main/student
+      // map rather than an unexplained dot at (0,0); in Side view just skip "me".
       if (!isMe || sideViewOn) return;
       Object.assign(p, deterministicPos(p.name, p.cluster));
     }
     const c = document.createElementNS('http://www.w3.org/2000/svg','circle');
     c.setAttribute('cx', sideViewOn ? p.sideX : p.x); c.setAttribute('cy', sideViewOn ? p.sideY : p.y);
-    // Start compact at the overview; SVG zoom then enlarges nodes naturally,
-    // making individual attendees easier to select at close range.
+    // compact at the overview; SVG zoom enlarges nodes
     c.setAttribute('r', isMe ? 7 : 1.7);
     c.style.fill = isMe ? 'var(--ink)' : 'var(--purple)'; // theme vars, so Dark Mode recolours the map too
     if (!isMe) c.setAttribute('fill-opacity', '.5');
@@ -1954,19 +2230,12 @@ function renderHome(){
     svg.appendChild(c);
   });
 
-  // top matches: prefer precomputed real-embedding similarity; fall back to the keyword-overlap
-  // heuristic for anyone not yet embedded (a brand-new profile made this session, or if
-  // umap_positions.json never loaded)
+  // top matches: precomputed embedding similarity, else the keyword heuristic for anyone not yet embedded
   let matchCandidates;
-  if (loadedMatchCandidates){
+  if (sideViewOn){
+    matchCandidates = hobbyMatches(currentUser);  // soft hobby overlap, computed here from hobby_sim.json
+  } else if (loadedMatchCandidates){
     matchCandidates = loadedMatchCandidates;
-  } else if (sideViewOn && currentUser.sideTopMatches && currentUser.sideTopMatches.length){
-    matchCandidates = currentUser.sideTopMatches
-      .map(m => {
-        const person = ATTENDEES.find(a => a.personId === m.person_id);
-        return person ? { ...person, score: m.score } : null;
-      })
-      .filter(Boolean);
   } else if (!sideViewOn && currentUser.topMatches && currentUser.topMatches.length){
     matchCandidates = currentUser.topMatches
       .map(m => {
@@ -1974,26 +2243,16 @@ function renderHome(){
         return person ? { ...person, score: m.score } : null;
       })
       .filter(Boolean);
-  } else if (sideViewOn){
-    matchCandidates = ATTENDEES
-      .filter(a=>a.name!==currentUser.name && a.sideInterest)
-      .map(a=>({...a, score: matchScore(currentUser, a, 'sideInterest')}))
-      .sort((a,b)=>b.score-a.score);
   } else {
     matchCandidates = ATTENDEES
       .filter(a=>a.name!==currentUser.name)
       .map(a=>({...a, score: matchScore(currentUser, a)}))
       .sort((a,b)=>b.score-a.score);
   }
-  // loadedMatchCandidates is already student-/side-filtered server-side (see setViewMode/
-  // showMoreMatches, which pass studentOnly=1 or space=side) — only the offline fallback
-  // branches above still need filtering here.
+  // loadedMatchCandidates is already filtered server-side; only the offline fallbacks need filtering here
   if (studentViewOn && !loadedMatchCandidates) matchCandidates = matchCandidates.filter(p => p.isStudent);
-  // Drop co-authors from academic matches (server pages are already filtered server-side, but
-  // the baked top-5 and keyword fallbacks aren't). Hobby view keeps them on purpose — sharing
-  // a hobby with a co-author is a genuine match. Note the baked top-5 can shrink below 5 here
-  // for someone whose closest neighbors are all labmates; "Show more" fetches the full
-  // server-filtered ranking.
+  // Drop co-authors from academic matches (baked top-5 and keyword fallbacks aren't filtered server-side); Hobby view
+  // keeps them on purpose. The baked list can shrink below 5; "Show more" fetches the full server-filtered ranking.
   if (!sideViewOn){
     const coa = COAUTHORS.get(currentUser.personId);
     if (coa) matchCandidates = matchCandidates.filter(p => !coa.has(p.personId));
@@ -2005,16 +2264,15 @@ function renderHome(){
   scored.forEach(p=>{
     const row = document.createElement('button');
     row.className='row';
-    row.onclick = () => { focusPersonOnMap(p); openBubble(p); };
-    row.innerHTML = `
-      <div class="rowname">${nameHtml(p)}</div>
+    row.onclick = () => { if (!sideViewOn) focusPersonOnMap(p); openBubble(p); };
+    row.innerHTML = `<div class="rowname">${nameHtml(p)}</div>
       <div class="score">${p.score}%</div>`;
     tm.appendChild(row);
   });
   if (!scored.length){
     // HIG "Writing": a blank area needs a next step, not silence.
     tm.innerHTML = `<div class="empty-note">${sideViewOn
-      ? "No one's close to your side interests yet - check back as more people add theirs."
+      ? (parseHobbies(currentUser.sideInterest).length ? "No hobby matches yet - tap a word in the cloud to see who's into what." : "Add your non-academic interests to see who shares them.")
       : "No matches to show yet. If you just created or edited your profile, it takes a few minutes to be placed on the map - check back shortly."}</div>`;
   }
   const matchesMore = document.getElementById('topMatchesMore');
@@ -2029,28 +2287,24 @@ function renderHome(){
     let shared=0; tk.forEach(w=>{ if(uKeywords.has(w)) shared++; });
     return shared*10 + (hashCode(l.title) % 20);
   };
-  // Recommending someone's own talk (or one they co-authored) back to them is noise — they
-  // already know about it. A co-author's OTHER, unrelated work still stays eligible: knowing
-  // someone doesn't mean knowing everything they're presenting.
-  // Awards and mentoring aren't topical, so never suggest them; they stay in the data, so they
-  // still open from a person's profile. Meet-Ups/Workshops stay: often topic-based, good for meeting people.
-  // One suggestion per item: posters and some papers run in 2+ sessions (802 in chi2026); the card lists every time.
+  // Never recommend someone's own or co-authored talk; a co-author's other work stays eligible.
+  // Awards and mentoring aren't topical, so never suggested. One suggestion per item; the card lists every time.
   const seenIds = new Set();
   const eligibleLectures = LECTURES.filter(l => !NOT_SUGGESTED_TYPES.has(l.sessionType) &&
     !(l.authors||[]).some(au => au.toLowerCase() === currentUser.name.toLowerCase()) &&
     !seenIds.has(l.id) && seenIds.add(l.id));
   eligibleLectures
-    .map(l=>({...l, score: lectureScore(l)}))
-    .sort((a,b)=>b.score-a.score)
+    .map(l=>({...l, score: lectureScore(l), past: programPast(l) || programCancelled(l)}))
+    .sort((a,b)=>(a.past - b.past) || (b.score-a.score))   // sessions that already ended sink to the bottom
     .slice(0, lectureVisibleCount)
     .forEach(l=>{
       const row = document.createElement('button');
-      row.className = 'row';
+      row.className = 'row' + (l.past ? ' past' : '');
       row.style.cssText = 'width:100%; border:1px solid var(--line); font:inherit; cursor:pointer; align-items:flex-start; text-align:left;';
       row.onclick = () => openProgramBubble(l);
       row.innerHTML = `
         <div>
-          <div class="rowname">${escapeHtml(l.title)}</div>
+          <div class="rowname">${escapeHtml(programTitle(l))}</div>
           <div class="rowsub" style="margin-top:2px;">${fmtProgramWhen(l)}${sessionsOf(l).length > 1 ? ` (+${sessionsOf(l).length - 1} more time)` : ''}</div>
           <div class="rowsub" style="margin-top:2px; font-style:italic;">${escapeHtml(programAuthorsLine(l))}</div>
         </div>`;
@@ -2070,12 +2324,18 @@ function programAuthorsLine(l){
 
 // ---------- bubble popup ----------
 function openBubble(p){
+  track('open_person');
+  // Server match rows carry no presentations; take them from the full attendee record.
+  if (!p.presentations && p.personId){
+    const full = ATTENDEES.find(a => a.personId === p.personId);
+    if (full) p = {...full, ...p, presentations: full.presentations};
+  }
   currentBubblePerson = p;
   const isSelf = currentUser && p.name === currentUser.name;
   document.getElementById('bubAvatar').textContent = initials(p.name);
   document.getElementById('bubName').innerHTML = nameHtml(p) + (isSelf ? ' (you)' : '');
   document.getElementById('bubAff').textContent = p.aff;
-  document.getElementById('bubBio').innerHTML = renderBio(sideViewOn ? (p.sideInterest || 'No side interests on file.') : p.bio);
+  document.getElementById('bubBio').innerHTML = renderBio(sideViewOn ? (hobbiesCommaSeparated(p.sideInterest) || 'No side interests on file.') : p.bio);
   const presBox = document.getElementById('bubPresenting');
   const pres = p.presentations || [];
   presBox.innerHTML = '';
@@ -2090,7 +2350,8 @@ function openBubble(p){
       const title = document.createElement(c.programUrl ? 'a' : 'div');
       title.style.cssText = 'font-weight:700; display:block;';
       if (c.programUrl){ title.href = c.programUrl; title.target = '_blank'; title.rel = 'noopener noreferrer'; title.style.color = 'inherit'; }
-      title.textContent = c.title;
+      title.textContent = programTitle(c);
+      if (programCancelled(c)) block.style.opacity = '.55';
       const when = document.createElement('div');
       when.style.cssText = 'margin-top:2px; font-weight:500;';
       when.textContent = `${fmtDate(c.date)} · ${c.startTime}–${c.endTime} · ${c.location}`;
@@ -2141,17 +2402,16 @@ function closeSavedOverlayBg(e){ if(e.target.id==='savedOverlay') closeSavedOver
 
 // ---------- program detail popup ----------
 let currentBubbleProgram = null;
-// Session names carry a leading technical-group code where one applies, e.g.
-// "CEDM4: Trust and Transparency in AI-Assisted Decision Making" — pull it out so it can be
-// shown even when the rest of the name just repeats the presentation title.
+// Session names may carry a leading group code ("CEDM4: Trust and…"); pull it out so it shows even when the rest repeats the title.
 function splitSessionCode(sessionName){
   const m = (sessionName || '').match(/^([A-Za-z]{2,6}\d{1,3}[a-c]?):\s*(.*)$/);
   return m ? {code: m[1].toUpperCase(), rest: m[2]} : {code: null, rest: sessionName || ''};
 }
 function openProgramBubble(l){
+  track('open_program');
   currentBubbleProgram = l;
-  document.getElementById('progTitle').textContent = l.title;
-  document.getElementById('progWhen').innerHTML = sessionsOf(l).map(s => escapeHtml(fmtProgramWhen(s))).join('<br>');
+  document.getElementById('progTitle').textContent = programTitle(l);
+  document.getElementById('progWhen').innerHTML = sessionsOf(l).map(s => escapeHtml(fmtProgramWhen(s))).join('<br>') + (programCancelled(l) ? ' <span class="ended-tag">canceled</span>' : programPast(l) ? ' <span class="ended-tag">ended</span>' : '');
   const {code, rest} = splitSessionCode(l.sessionName);
   const sessionLabel = rest && rest !== l.title ? rest : (l.sessionType || '');
   document.getElementById('progSession').textContent = [code, sessionLabel].filter(Boolean).join(' · ');
@@ -2173,10 +2433,7 @@ function handleSaveProgramClick(){
 }
 function closeProgramOverlay(){
   document.getElementById('programOverlay').classList.remove('active');
-  // The Saved Program list is deliberately left open underneath this popup (see
-  // openSavedProgramsList()) so closing returns to the list instead of jumping to Home —
-  // but that means a Save/remove done from inside the popup needs the list refreshed too,
-  // or it goes on showing a since-removed session until reopened from scratch.
+  // The Saved Program list stays open underneath (see openSavedProgramsList()), so a save/remove from the popup refreshes it too.
   if (document.getElementById('savedProgramsOverlay').classList.contains('active')) openSavedProgramsList();
 }
 function closeProgramOverlayBg(e){ if(e.target.id==='programOverlay') closeProgramOverlay(); }
@@ -2186,8 +2443,7 @@ function openSavedProgramsList(){
   const items = ids.map(id => LECTURES.find(l => l.id === id)).filter(Boolean)
     .map(l => ({...l, startMin: timeToMinutes(l.startTime), endMin: timeToMinutes(l.endTime)}))
     .sort((a,b) => a.date === b.date ? a.startMin - b.startMin : (a.date < b.date ? -1 : 1));
-  // Group sessions whose times overlap onto one line — the layout itself shows the
-  // conflict, no separate warning icon needed.
+  // Overlapping sessions share one line; the layout itself shows the conflict.
   const clusters = [];
   items.forEach(item => {
     const last = clusters[clusters.length - 1];
@@ -2212,25 +2468,22 @@ function openSavedProgramsList(){
       list.appendChild(header);
     }
     const line = document.createElement('div');
-    // A single session gets the full-width row as before. Two+ overlapping ones don't
-    // squeeze into ever-thinner columns (unreadable past 2-3) — they scroll horizontally
-    // instead, each at a fixed, comfortably readable width.
+    // Two+ overlapping sessions scroll horizontally at a fixed width instead of squeezing into thin columns.
     const scrollable = cluster.items.length > 1;
     line.style.cssText = scrollable
       ? 'display:flex; gap:8px; margin-bottom:8px; overflow-x:auto; scroll-snap-type:x proximity; -webkit-overflow-scrolling:touch; padding-bottom:2px;'
       : 'display:flex; gap:8px; margin-bottom:8px;';
     cluster.items.forEach(l => {
       const card = document.createElement('button');
-      card.className = 'row';
+      card.className = 'row' + (programPast(l) || programCancelled(l) ? ' past' : '');
       card.style.cssText = (scrollable
         ? 'flex:0 0 82%; scroll-snap-align:start;'
         : 'flex:1; min-width:0;')
         + ' border:1px solid var(--line); font:inherit; cursor:pointer; text-align:left; align-items:flex-start; margin-bottom:0;';
-      // Leave the saved-program list open underneath — closing the detail popup
-      // should land back here, not jump all the way to the home screen.
+      // leave the saved-program list open underneath
       card.onclick = () => openProgramBubble(l);
       card.innerHTML = `<div>
-        <div class="rowname">${escapeHtml(l.title)}</div>
+        <div class="rowname">${escapeHtml(programTitle(l))}</div>
         <div class="rowsub" style="margin-top:2px;">${fmtProgramWhen(l)}</div>
       </div>`;
       line.appendChild(card);
@@ -2256,7 +2509,7 @@ function toggleTheme(){
   localStorage.setItem('peapod_theme', dark ? 'dark' : 'light');
   document.getElementById('themeToggle').textContent = themeLabel();
 }
-function openFaq(){ document.getElementById('faqOverlay').classList.add('active'); }
+function openFaq(){ track('faq'); document.getElementById('faqOverlay').classList.add('active'); }
 function closeFaq(){ document.getElementById('faqOverlay').classList.remove('active'); }
 function closeFaqBg(e){ if(e.target.id==='faqOverlay') closeFaq(); }
 async function submitFeedback(){
@@ -2275,6 +2528,7 @@ function runSearch(){
   const box = document.getElementById('searchResults');
   box.innerHTML = '';
   if (q.length < 2) return;
+  clearTimeout(_searchTrack); _searchTrack = setTimeout(() => track('search'), 1500);  // one count per typing burst, never the text
   const matches = ATTENDEES.filter(a => a.name.toLowerCase().includes(q)).slice(0, 8);
   if (!matches.length){
     box.innerHTML = '<p class="sub" style="margin:0 0 12px;">No attendees found.</p>';
@@ -2291,11 +2545,9 @@ function runSearch(){
   });
 }
 function closeOverlayBg(e){ if(e.target.id==='overlay') closeOverlay(); }
-// Popups behave as dialogs for keyboard and VoiceOver: focus moves to ✕ on open and back to the
-// opener on close, Esc closes the topmost one, and screens behind are inert so Tab can't wander under.
-// ponytail: one class-change observer instead of editing each of the 7 open/close functions.
-// Rows re-render on click (focusPersonOnMap) before the popup opens, so remember the element's
-// slot (parent id + index) as well — the row is gone by then, its replacement sits in the same place.
+// Popups behave as dialogs: focus moves to ✕ on open and back to the opener on close, Esc closes the topmost,
+// screens behind are inert. One class-change observer instead of editing each open/close function. Rows re-render
+// before the popup opens, so remember the opener's slot (parent id + index), not the element.
 let lastFocusOutside = null;
 document.addEventListener('focusin', e => {
   const el = e.target;
@@ -2327,6 +2579,7 @@ document.addEventListener('keydown', e => {
   if (top) top.onclick({target: top}); // each overlay's own backdrop-close handler
 });
 restoreLocalProfileOnLoad();
+track(localStorage.getItem(CACHE_KEY) ? 'open_returning' : 'open_first');
 </script>
 </body>
 </html>

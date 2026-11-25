@@ -1,4 +1,4 @@
-# ponytail: local-only stand-in for nginx: static files from cwd, /api/* forwarded to :8000. Never deploy this.
+# Local stand-in for nginx: static files from cwd, /api/* forwarded to :8000. Never deploy this.
 import http.server, urllib.request, urllib.error
 class H(http.server.SimpleHTTPRequestHandler):
     def _proxy(self):

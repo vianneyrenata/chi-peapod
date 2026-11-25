@@ -52,6 +52,10 @@ install -m 0644 /opt/hfes-match/deploy/hfes-match.service /etc/systemd/system/hf
 install -m 0644 /opt/hfes-match/deploy/hfes-match-worker.service /etc/systemd/system/hfes-match-worker.service
 install -m 0644 /opt/hfes-match/deploy/nginx.conf /etc/nginx/sites-available/hfes-match
 install -D -m 0644 /opt/hfes-match/deploy/security-headers.conf /etc/nginx/snippets/hfes-security-headers.conf
+install -m 0644 /opt/hfes-match/deploy/logrotate-nginx /etc/logrotate.d/nginx   # access.log 1 day, error.log 7
+# Watchdog: emails the owner when a unit is down, health fails, disk/memory are low, or a job is stuck/failed.
+printf '*/5 * * * * root /usr/bin/python3 /opt/hfes-match/deploy/healthcheck.py >> /var/log/hfes-healthcheck.log 2>&1\n' > /etc/cron.d/hfes-healthcheck
+chmod 0644 /etc/cron.d/hfes-healthcheck
 rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/hfes-match /etc/nginx/sites-enabled/hfes-match
 if [ ! -f /etc/hfes-match.env ]; then

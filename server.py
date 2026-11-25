@@ -1,17 +1,7 @@
 #!/usr/bin/env python3
-"""HFE Peapod (formerly HFES Match) application server.
-
-Static pages are deliberately served by Nginx in production.  This process only
-handles the small JSON API and keeps the conference catalogue in memory, so a
-burst of attendee browsing never touches SQLite or the embedding model unless it
-needs to.
-
-Flask app served by gunicorn in production (deploy/gunicorn.conf.py); `python3
-server.py` runs Flask's dev server for local work.  Both run ONE process with many
-threads: the rebuild timer, REBUILD_LOCK and the per-IP rate-limit windows live in
-process memory, so a second worker process would run a second, unsynchronised copy
-of all of them.
-"""
+"""CHI Peapod API server. Nginx serves the static files; this process answers the JSON API and
+keeps the catalogue in memory. Runs as ONE process with many threads: the rebuild timer, REBUILD_LOCK
+and the rate-limit windows live in process memory."""
 from __future__ import annotations
 
 import argparse
@@ -20,6 +10,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import subprocess
 import sys
 import threading
@@ -27,7 +18,7 @@ import time
 import urllib.error
 import urllib.request
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from pathlib import Path
 
@@ -37,27 +28,26 @@ from psycopg.rows import dict_row
 
 ROOT = Path(__file__).resolve().parent
 STATE = Path(os.environ.get("HFES_STATE_DIR", ROOT / "state"))
-# libpq connection string. The default reaches a local server over its Unix socket with peer auth:
-# the OS user IS the Postgres role, so there is no password to store. Same var in embed_umap.py.
+# libpq connection string; the default is the local Unix socket with peer auth (no password).
 DATABASE_URL = os.environ.get("HFES_DATABASE_URL", "dbname=hfes")
 ADMIN_TOKEN = os.environ.get("HFES_REEMBED_TOKEN", "")
+# Read-only dashboard password (owner-chosen, short, typed on phones). Separate from the rebuild token on
+# purpose: leaking it exposes a traffic graph, not a full re-embed. The rebuild token is accepted too.
+DASHBOARD_TOKEN = os.environ.get("HFES_DASHBOARD_TOKEN", "")
 MAX_BODY = 64 * 1024
 REBUILD_DELAY_SECONDS = max(0, int(os.environ.get("HFES_AUTO_REBUILD_SECONDS", "900")))
 
-# Periodic Hobby-space-only full refit (see periodic_side_refit_check() below). The academic
-# space never does this — it's dense and frozen by design — but the Hobby space starts empty and
-# grows slowly as people opt in, so its projection is worth reshaping occasionally, unlike a
-# per-edit incremental placement which only ever adds/moves that one person's own dot.
+# The Hobby space starts empty and grows as people opt in, so it gets refit periodically.
+# The academic map never does: it's frozen by design.
 SIDE_REFIT_INTERVAL_SECONDS = max(0, int(os.environ.get("HFES_SIDE_REFIT_INTERVAL_SECONDS", str(24 * 60 * 60))))
-SIDE_REFIT_CHECK_SECONDS = max(60, int(os.environ.get("HFES_SIDE_REFIT_CHECK_SECONDS", str(60 * 60))))
-# CHI programme feed poll (chi_feed.py). The feed asks for once a minute during the conference;
-# 0 disables it (tests, or a box that should keep serving a frozen copy).
+# 0 = off: the Hobby view is a browser-side word cloud, so the side UMAP is never displayed.
+SIDE_REFIT_CHECK_SECONDS = int(os.environ.get("HFES_SIDE_REFIT_CHECK_SECONDS", "0"))
+if SIDE_REFIT_CHECK_SECONDS: SIDE_REFIT_CHECK_SECONDS = max(60, SIDE_REFIT_CHECK_SECONDS)
+# Programme feed poll interval (chi_feed.py); 0 disables it.
 FEED_CHECK_SECONDS = max(0, int(os.environ.get("HFES_FEED_CHECK_SECONDS", "60")))
 SIDE_REFIT_INITIAL_DELAY_SECONDS = max(1, int(os.environ.get("HFES_SIDE_REFIT_INITIAL_DELAY_SECONDS", "60")))
 
-# Optional ops alert on a failed rebuild job — sent via plain SMTP (stdlib smtplib, no new
-# dependency) rather than a cloud notification service, since server.py stays dependency-free by
-# design. Absent config = quietly does nothing, same pattern as ANTHROPIC_API_KEY below.
+# Optional alert email on a failed rebuild. Unset = does nothing.
 ALERT_EMAIL_TO = os.environ.get("HFES_ALERT_EMAIL_TO", "")
 ALERT_SMTP_HOST = os.environ.get("HFES_ALERT_SMTP_HOST", "smtp.gmail.com")
 ALERT_SMTP_PORT = int(os.environ.get("HFES_ALERT_SMTP_PORT", "587"))
@@ -66,8 +56,7 @@ ALERT_SMTP_PASSWORD = os.environ.get("HFES_ALERT_SMTP_PASSWORD", "")
 
 
 def send_alert_email(subject: str, body: str) -> None:
-    """Best-effort ops alert. Never raises and never blocks the caller — an alert failing to send
-    must not crash the rebuild worker or mask the original error. Quietly does nothing if unset."""
+    """Best-effort: never raises, so a failed alert can't mask the original error."""
     if not (ALERT_EMAIL_TO and ALERT_SMTP_USER and ALERT_SMTP_PASSWORD):
         return
     try:
@@ -84,8 +73,7 @@ def send_alert_email(subject: str, body: str) -> None:
     except Exception as exc:
         print(f"send_alert_email: failed to send: {exc}", file=sys.stderr)
 
-# Optional: drafts a short bio for a brand-new signup via a web-search-backed Haiku call.
-# Absent key = feature quietly disabled (draft_bio() returns None), never a hard error.
+# Optional: draft a bio for a new signup with a web-search-backed Haiku call. Unset = disabled.
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 DRAFT_BIO_SYSTEM_PROMPT = """You are drafting a STARTING POINT for a conference attendee's research-interest \
 paragraph — not a finished biography. They will see their own name directly above this text and are \
@@ -128,30 +116,25 @@ the conference, the search, the sources, missing information, or that anything w
 Your entire final response must be only that paragraph — no preamble like "I'll search for..." or \
 "Based on the results...", no extra paragraphs, no word count, no meta-commentary."""
 
-# No rate limit on drafts (removed 2026-10-06 at the owner's call): a venue's Wi-Fi puts many attendees
-# behind one public IP, so any per-IP limit starves real signups. The only spend guard left is the
-# spending limit set in the Anthropic Console. Each draft holds one of the 32 gunicorn threads for ~8 s.
+# No per-IP limit on drafts: venue Wi-Fi puts many attendees behind one IP. The spend guard is the
+# limit in the Anthropic Console.
 
 
 def client_ip(headers, fallback: str) -> str:
-    """The visitor's IP as seen through CloudFront. Nginx's X-Real-IP is $remote_addr, which behind
-    CloudFront is the EDGE's address — so any per-IP limit keyed on it is really per-edge (one abuser
-    shares a bucket with every real visitor at that edge). CloudFront appends the viewer IP as the LAST
-    X-Forwarded-For hop, and the viewer can't forge that hop; take it. Direct-to-origin traffic (no
-    CloudFront hop) falls back to X-Real-IP, which is then the real client anyway."""
+    """Behind CloudFront, X-Real-IP is the edge; the viewer is the last X-Forwarded-For hop, which
+    the viewer can't forge."""
     xff = headers.get("X-Forwarded-For", "")
     return xff.rsplit(",", 1)[-1].strip() or headers.get("X-Real-IP") or fallback
 
 
-# POST /api/profile is unauthenticated by design (good-faith claiming) — this is the only thing
-# standing between a script and overwriting all ~1,650 bios in seconds. A real person editing their
-# own profile makes a handful of writes; cap at 20 per IP per 10 minutes. The browser already
-# treats a failed publish as "saved on this device, will retry", so a tripped limit loses nothing.
-# ponytail: in-memory sliding window, resets on restart, one list per active IP — fine for a
-# one-week event; move to SQLite if the process ever needs to remember across restarts.
+# POST /api/profile is unauthenticated (good-faith claiming); this cap is what stops a script from
+# overwriting every bio. In-memory sliding window, resets on restart.
 _PROFILE_WRITE_LOCK = threading.Lock()
 _profile_writes: dict[str, list[float]] = {}
-PROFILE_WRITES_PER_WINDOW = 20
+# Sized for a venue where the whole hall shares one public IP (owner's note, 2026-10-07): an opening-session
+# rush of a few hundred signups in ten minutes must not trip it, while a script hammering the endpoint still
+# does. Each write is one cheap upsert plus a coalesced placement job, so 500 is not a load concern.
+PROFILE_WRITES_PER_WINDOW = 500
 PROFILE_WINDOW_SECONDS = 600
 
 
@@ -164,28 +147,20 @@ def profile_write_allowed(ip: str, now: float) -> bool:
         _profile_writes[ip] = recent + [now]
         return True
 
-# The browser calls /api/client-error when it can't load the CSVs/embeddings at all (a real
-# outage, not the normal "server just hasn't finished a rebuild yet" case) — reuses the same
-# send_alert_email() as a failed rebuild job. A GLOBAL cooldown, not per-IP: a real outage means
-# many different visitors' browsers all hit this within seconds of each other, and per-IP
-# wouldn't stop that from being one email per visitor.
+# /api/client-error alerts on a real outage. Global cooldown, not per-IP: every visitor hits it at once.
 _CLIENT_ERROR_LOCK = threading.Lock()
 _last_client_error_alert = 0.0
-CLIENT_ERROR_COOLDOWN_SECONDS = 600
+CLIENT_ERROR_COOLDOWN_SECONDS = 120  # owner wants to hear early and often when something needs them
 
 
 def draft_bio(name: str, aff: str) -> str | None:
-    """Ask Haiku (with web search) for a ~100-word bio. None if disabled, no confident match, or any
-    failure — callers must treat this as a nice-to-have, never block signup on it."""
+    """Ask Haiku (with web search) for a ~100-word bio. None if disabled, no match, or any failure."""
     if not ANTHROPIC_API_KEY:
         return None
     body = json.dumps({
         "model": "claude-haiku-4-5",
         "max_tokens": 3000,
-        # Without extended thinking, Haiku 4.5 has no private scratchpad — its multi-round search
-        # reasoning ("I'll search... not found... let me try again...") lands directly in visible
-        # text blocks instead. Confirmed live: this leaked as the "bio" before thinking was added
-        # here. budget_tokens must be < max_tokens on this (pre-4.6) model.
+        # Thinking keeps the search narration out of the visible text blocks.
         "thinking": {"type": "enabled", "budget_tokens": 1536},
         "system": DRAFT_BIO_SYSTEM_PROMPT,
         "tools": [{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}],
@@ -208,28 +183,15 @@ def draft_bio(name: str, aff: str) -> str | None:
         return None
     if data.get("stop_reason") == "refusal":
         return None
-    # Join every text block that comes AFTER the last non-text block (thinking/tool_use/tool_result),
-    # not just the very last block. Confirmed live via a one-off debug dump: the two-line answer
-    # (headline, then sentence) is sometimes split across two separate consecutive text blocks — an
-    # earlier version took only the last of those and silently dropped the headline. Interim search
-    # narration ("I'll search...", "Not found, let me try again...") still gets excluded correctly,
-    # since it's separated from the final answer by at least one tool_use/tool_result block.
+    # The answer is every text block after the last tool/thinking block; it can span more than one.
     content = data.get("content", [])
     last_non_text_idx = max((i for i, b in enumerate(content) if b.get("type") != "text"), default=-1)
     text = "".join(b.get("text", "") for i, b in enumerate(content)
                    if i > last_non_text_idx and b.get("type") == "text").strip()
-    # Confirmed live: even the final block can carry a stray leading fragment (e.g. a trailing "."
-    # left over from a truncated lead-in sentence) before the real bio starts.
     text = re.sub(r"^[.\s]+", "", text)
-    # Confirmed live (with the older headline prompt): a preamble sentence ("Based on my search
-    # results...") can precede the answer with no tool-call boundary to key off. The answer is one
-    # paragraph, so keep the last blank-line-separated paragraph and drop any stray Markdown.
-    # ponytail: last paragraph wins; a two-paragraph answer loses its first half, acceptable for a draft.
+    # A preamble sentence can precede the answer; keep the last paragraph and drop stray Markdown.
     text = re.split(r"\n\s*\n", text.strip())[-1].replace("**", "").strip()
-    # Belt-and-suspenders beyond the prompt: Haiku sometimes narrates its search ("I'll look this
-    # up... NO_MATCH") instead of replying with only the sentinel. Treat NO_MATCH appearing anywhere
-    # as a decline — the alternative (an exact-match check only) would hand that narration to a real
-    # attendee as their "bio," which happened in testing before this check was added.
+    # NO_MATCH anywhere counts as a decline; the model sometimes narrates around the sentinel.
     if not text or re.search(r"\bNO_MATCH\b", text):
         return None
     return text[:2000]  # defensive cap; the prompt already asks for 90-120 words
@@ -253,22 +215,27 @@ CREATE TABLE IF NOT EXISTS jobs (
   job_id TEXT PRIMARY KEY, status TEXT NOT NULL, requested_at TEXT NOT NULL,
   started_at TEXT, finished_at TEXT, detail TEXT
 );
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS pending TEXT;  -- the job's original detail, kept across retries
 CREATE TABLE IF NOT EXISTS feedback (
   feedback_id TEXT PRIMARY KEY, message TEXT NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS metrics (
+  bucket TEXT NOT NULL, kind TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (bucket, kind)
+);
+DO $$ BEGIN  -- 2026-10-07: buckets went from hour (13 chars) to minute (16 chars); old rows stay summable
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='metrics' AND column_name='hour')
+  THEN ALTER TABLE metrics RENAME COLUMN hour TO bucket; END IF; END $$;
 CREATE TABLE IF NOT EXISTS profile_edits (
   edit_id TEXT PRIMARY KEY, profile_id TEXT NOT NULL, person_id TEXT,
   change_json TEXT NOT NULL, created_at TEXT NOT NULL
 );
 """
-# ponytail: timestamps stay ISO-8601 TEXT, exactly as in the SQLite era — the browser compares
-# updatedAt strings to detect a placement, and ISO text sorts chronologically. TIMESTAMPTZ would be
-# the idiomatic column type; switching means changing that comparison too.
+# Timestamps are ISO-8601 TEXT: the browser compares updatedAt strings to detect a placement.
 
 
 class Store:
-    # ponytail: one shared connection serialised by self.lock, like the SQLite version — every query
-    # is sub-millisecond. Move to psycopg_pool if DB time ever shows up in request latency.
+    # One shared connection serialised by self.lock; every query is sub-millisecond.
     def __init__(self) -> None:
         STATE.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
@@ -278,8 +245,7 @@ class Store:
 
     @property
     def conn(self):
-        # Reconnect after a Postgres restart instead of failing every request from then on;
-        # the request that finds the dead connection still errors, the next one gets a new one.
+        # Reconnect after a Postgres restart.
         if self._conn is None or self._conn.closed or self._conn.broken:
             self._conn = psycopg.connect(DATABASE_URL, autocommit=True, row_factory=dict_row)
         return self._conn
@@ -342,18 +308,14 @@ class Catalogue:
         self.lock = threading.RLock()
         self.people: dict[str, dict] = {}
         self.generated_at = None
-        # Two independent embedding spaces: "main" (academic bio, always populated) and "side"
-        # (optional non-academic interests — only whoever's filled it in, may be empty entirely
-        # before the first full run that finds enough people). Same shape for both, keyed by
-        # name, so matches()/match_page() take a `space` argument instead of duplicating.
+        # Two embedding spaces of the same shape: "main" (academic) and "side" (optional hobbies).
         self._spaces: dict[str, dict] = {"main": {}, "side": {}}
         self.reload()
 
     def reload(self) -> None:
         with open(ROOT / "authors.csv", encoding="utf-8-sig", newline="") as handle:
             rows = list(csv.DictReader(handle))
-        # s_profile is the canonical bio ("**Headline**\nBody", rendered bold client-side by
-        # index.html's renderBio()) — same precedence as embed_umap.py's bio_text().
+        # Same bio precedence as embed_umap.py's bio_text().
         people = {r["Person ID"]: {"personId": r["Person ID"], "name": r["Author"], "aff": r["Affiliation"],
             "bio": r.get("s_profile") or r.get("Interest Profile") or r.get("Presentation Titles") or "No profile on file.",
             "isStudent": (r.get("Is Student") or "").strip() == "1",
@@ -370,8 +332,7 @@ class Catalogue:
             ("side", "side_umap_positions.json", "side_embeddings.npy", "side_embeddings_person_ids.json"),
         ):
             positions_path = ROOT / positions_file
-            # The side space's files don't exist at all until enough people have opted in and a
-            # full rebuild has run — treat that as "zero people embedded there", not an error.
+            # The side space's files don't exist until enough people have opted in.
             payload = json.loads(positions_path.read_text()) if positions_path.exists() else {"people": [], "generated_at": None}
             positions = {p["person_id"]: p for p in payload.get("people", [])}
             try:
@@ -394,11 +355,8 @@ class Catalogue:
             self._spaces = spaces
 
     def placement(self, person_id: str) -> dict:
-        """Polled by index.html's "Creating/Updating your profile…" screen (waitForPlacement()) after
-        a signup or bio edit: has this person's incremental placement landed? Answered from the
-        catalogue — reloaded after every job, served no-store — rather than umap_positions.json,
-        which CloudFront may hold for up to an hour. Raw UMAP x/y plus the map's extents so the
-        client scales them exactly like every other dot; top matches co-author-filtered like matches()."""
+        """Has this person's placement landed? Served no-store from memory, since CloudFront may hold
+        umap_positions.json for an hour. Returns raw x/y plus the map extents so the client scales it."""
         with self.lock:
             positions = self._spaces["main"]["positions"]
             p = positions.get(person_id)
@@ -437,14 +395,11 @@ class Catalogue:
                 import numpy as np
                 excluded = self.coauthors.get(person_id, set()) if space == "main" else set()
                 order = np.argsort(-(embeddings @ embeddings[i]))
-                # Ranked row indices only (4 bytes each). Caching full per-match dicts cost ~0.5 MB per
-                # attendee — 810 MB once everyone had looked — on a box that also holds the model.
+                # Cache row indices only; full dicts cost ~0.5 MB per attendee.
                 s["match_cache"][person_id] = np.array(
                     [j for j in order if j != i and embedding_ids[j] in self.people and embedding_ids[j] not in excluded],
                     dtype=np.int32)
             ranked = s["match_cache"][person_id]
-            # ponytail: re-filtering on every call instead of caching per student_only variant —
-            # cheap at ~1,650 people; cache separately if this scale grows a lot.
             if student_only:
                 ranked = [j for j in ranked if self.people[embedding_ids[j]].get("isStudent")]
             page = [{**self.people[embedding_ids[j]], "score": round(float(embeddings[i] @ embeddings[j]) * 100)}
@@ -456,26 +411,28 @@ STORE = Store()
 CATALOGUE = Catalogue()
 REBUILD_LOCK = threading.Lock()
 
-# The warm embedding worker (`embed_umap.py worker`, systemd unit hfes-match-worker) listens here.
-# It keeps the sentence model + JIT-compiled UMAP resident so a placement takes ~1 s instead of the
-# ~30 s a cold subprocess needs (measured: ~20 s of that is imports + numba compile). Every job kind
-# is offered to it first and falls back to the original cold subprocess if it's absent or dies
-# mid-job — the worker is an accelerator, not a dependency.
+# The warm worker (`embed_umap.py worker`) keeps the model + UMAP loaded so a placement takes ~1 s
+# instead of ~30 s. Every job tries it first and falls back to a cold subprocess.
 WORKER_SOCKET = STATE / "worker.sock"
 
 
 def _run_via_worker(kind: str, items: list | None = None, timeout: float = 600) -> bool:
-    """Returns False when the worker isn't reachable or vanished mid-job (caller runs the cold
-    subprocess instead). Raises RuntimeError when the worker ran the job and it failed."""
+    """False if the worker is absent or died mid-job (caller falls back); RuntimeError if it ran and failed."""
     import socket
-    if not WORKER_SOCKET.exists():
-        return False
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    # Any OS-level trouble reaching the socket (missing, refused, or — seen 2026-10-07 while a deploy's
+    # bootstrap was re-chowning the tree — EACCES on the stat itself) means "use the cold path", never a
+    # failed job: the worker is an accelerator, not a dependency.
     try:
-        sock.settimeout(5)
-        sock.connect(str(WORKER_SOCKET))
+        if not WORKER_SOCKET.exists():
+            return False
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            sock.settimeout(5)
+            sock.connect(str(WORKER_SOCKET))
+        except OSError:
+            sock.close()
+            return False
     except OSError:
-        sock.close()
         return False
     with sock:
         sock.settimeout(timeout)
@@ -492,6 +449,12 @@ def _run_via_worker(kind: str, items: list | None = None, timeout: float = 600) 
     if not resp.get("ok"):
         raise RuntimeError(resp.get("error") or "worker reported failure without detail")
     return True
+# A failed job is retried automatically (owner's call, 2026-10-07): most failures seen so far were timing
+# (a deploy restart, the worker not warm yet) and pass on the next try. After MAX_ATTEMPTS the job is
+# final: `failed`, the owner gets an email with ready-to-run fix commands, and the person's browser is
+# told (via /api/placement) to ask them to email in.
+MAX_ATTEMPTS = 3
+RETRY_DELAY_SECONDS = 30
 REBUILD_TIMER_LOCK = threading.Lock()
 REBUILD_TIMER: threading.Timer | None = None
 
@@ -506,18 +469,12 @@ def row_json(row):
 
 def start_rebuild(job_id: str | None = None, kind: str = "full") -> dict:
     if not REBUILD_LOCK.acquire(blocking=False):
-        # ponytail: a rebuild is still running past this job's quiet window (measured
-        # full rebuild ~2min vs. the 900s default, so this should be rare). Retry
-        # shortly instead of leaving the job stuck "queued" forever; escalate to a
-        # fixed max-retry/backoff only if real rebuild times ever approach the window.
+        # A rebuild is still running: retry shortly rather than leave the job queued forever.
         if job_id is not None:
             _arm_timer(job_id, 30)
         return {"started": False, "job": dict(STORE.current_job() or {})}
     if job_id is None:
-        # No job_id means this is a fresh trigger with no pending-profiles list — either the
-        # manual /api/admin/rebuild endpoint (kind="full") or the periodic side-only refit
-        # (kind="side_only", see periodic_side_refit_check()). Either way the worker below does
-        # the one full pass the caller asked for, not a per-profile incremental placement.
+        # No job_id: a manual full rebuild or the periodic side-only refit, not a placement list.
         job_id = secrets.token_urlsafe(12)
         with STORE.tx() as db:
             db.execute("INSERT INTO jobs(job_id,status,requested_at,detail) VALUES(%s,%s,%s,%s)",
@@ -528,30 +485,20 @@ def start_rebuild(job_id: str | None = None, kind: str = "full") -> dict:
             with STORE.tx() as db:
                 row = db.execute("SELECT detail FROM jobs WHERE job_id=%s", (job_id,)).fetchone()
                 detail_raw = row["detail"] if row else None
-                # "side_only" is a sentinel, not JSON — check for it before attempting to parse,
-                # since json.loads("side_only") would raise and get silently swallowed into the
-                # same except branch a legacy plain-string detail hits, running a full BOTH-spaces
-                # rebuild by accident instead of the side-only one that was actually requested.
+                # "side_only" is a sentinel, not JSON; check before parsing or it falls into the full path.
                 side_only_refit = detail_raw == "side_only"
                 if side_only_refit:
                     pending = []
                 else:
                     try:
-                        # A job queued by a pre-upgrade process has detail as a plain reason string
-                        # ("profile changed"), not the JSON pending-list this version writes — treat
-                        # that as "no pending list" (falls through to a full rebuild below) instead
-                        # of crashing the worker on a deploy that lands mid-flight.
+                        # Older jobs stored a plain reason string here; treat that as no pending list.
                         pending = json.loads(detail_raw) if detail_raw else []
                     except (json.JSONDecodeError, TypeError):
                         pending = []
-                db.execute("UPDATE jobs SET status='running',started_at=%s WHERE job_id=%s", (utcnow(), job_id))
-            # Rebuild work is intentionally isolated from request handling — every request
-            # continues to use the last complete JSON while this runs.
+                db.execute("UPDATE jobs SET status='running',started_at=%s,attempts=attempts+1,pending=COALESCE(pending,%s) WHERE job_id=%s",
+                           (utcnow(), detail_raw, job_id))
             if pending:
-                # Preserve the "conference structure": place every changed profile with
-                # .transform() into the already-fitted UMAP space, in ONE subprocess (one
-                # model load, one batch encode, one write) — this never refits UMAP and
-                # never moves anyone else's dot. See embed_umap.py's incremental --batch.
+                # Incremental: transform into the fitted UMAP space in one batch; nobody else's dot moves.
                 batch = [{"person_id": p.get("personId") or p["profileId"], "name": p["name"],
                           "text": p.get("bio") or p["name"], "side_text": p.get("sideInterest", "")} for p in pending]
                 if not _run_via_worker("incremental", batch, timeout=10 * 60):
@@ -561,8 +508,6 @@ def start_rebuild(job_id: str | None = None, kind: str = "full") -> dict:
                         raise RuntimeError((run.stderr or run.stdout)[-3000:])
                 detail = f"Placed {len(pending)} profile(s) without moving anyone else."
             elif side_only_refit:
-                # Only the Hobby space's own UMAP/embeddings get refit — the academic map's
-                # files are never touched by this command, so those positions can't move.
                 if not _run_via_worker("side_only", timeout=4 * 60 * 60):
                     run = subprocess.run([sys.executable, str(ROOT / "embed_umap.py"), "full", "--side-only"], cwd=ROOT,
                         capture_output=True, text=True, timeout=4 * 60 * 60)
@@ -579,25 +524,61 @@ def start_rebuild(job_id: str | None = None, kind: str = "full") -> dict:
             CATALOGUE.reload()
             status = "complete"
         except Exception as exc:
-            status, detail = "failed", str(exc)[-3000:]
-            send_alert_email(
-                subject="[HFE Peapod] Rebuild job failed",
-                body=(
-                    f"A rebuild job failed and needs attention.\n\nJob ID: {job_id}\n\nError:\n{detail}\n\n"
-                    "To fix: this usually doesn't need finding the specific broken profile — every "
-                    "edit stays in SQLite regardless of this failure, and materialize_db_edits() "
-                    "re-processes the ENTIRE profiles table on every run, not just what's new. So "
-                    "triggering POST /api/admin/rebuild again typically resolves it, picking up "
-                    "whatever got stuck along with everything else. Check GET /api/rebuild first if "
-                    "you want to confirm the current state before retrying."
-                ),
-            )
+            error = str(exc)[-3000:]
+            with STORE.tx() as db:
+                row = db.execute("SELECT attempts, pending FROM jobs WHERE job_id=%s", (job_id,)).fetchone()
+            attempts = (row["attempts"] if row else MAX_ATTEMPTS)
+            if attempts < MAX_ATTEMPTS:
+                # Back to the queue with its original pending list, so a signup arriving meanwhile
+                # coalesces into it as usual; the timer re-runs it shortly.
+                status, detail = "queued", (row["pending"] if row else None)
+                print(f"job {job_id} failed (attempt {attempts}/{MAX_ATTEMPTS}), retrying in {RETRY_DELAY_SECONDS}s: {error}", file=sys.stderr)
+                if attempts == 1:  # heads-up on the first failure (owner's call: conservative); no action needed yet
+                    send_alert_email(subject="[CHI Peapod] FYI: a placement job failed once, retrying",
+                                     body=f"Job {job_id} failed on attempt 1 of {MAX_ATTEMPTS} and will retry in {RETRY_DELAY_SECONDS}s.\n"
+                                          f"No action needed unless a second email says it was given up on.\n\nError:\n{error}\n")
+                _arm_timer(job_id, RETRY_DELAY_SECONDS)
+            else:
+                status, detail = "failed", error
+                send_alert_email(subject=f"[CHI Peapod] Placement failed after {attempts} attempts",
+                                 body=failure_email(job_id, row["pending"] if row else None, error))
         finally:
             with STORE.tx() as db:
-                db.execute("UPDATE jobs SET status=%s,finished_at=%s,detail=%s WHERE job_id=%s", (status, utcnow(), detail, job_id))
+                if status == "queued":
+                    db.execute("UPDATE jobs SET status='queued',detail=%s WHERE job_id=%s", (detail, job_id))
+                else:
+                    db.execute("UPDATE jobs SET status=%s,finished_at=%s,detail=%s WHERE job_id=%s", (status, utcnow(), detail, job_id))
             REBUILD_LOCK.release()
     threading.Thread(target=worker, name="rebuild", daemon=True).start()
     return {"started": True, "jobId": job_id}
+
+
+def failure_email(job_id: str, pending_raw: str | None, error: str) -> str:
+    """What the owner reads at 7 am: what broke, who is affected, and commands to paste."""
+    try:
+        pending = json.loads(pending_raw) if pending_raw and pending_raw != "side_only" else []
+    except (json.JSONDecodeError, TypeError):
+        pending = []
+    lines = [f"A placement job failed {MAX_ATTEMPTS} times in a row and has been given up on.",
+             f"Job ID: {job_id}", "", "Error (last attempt):", error, ""]
+    if pending_raw == "side_only":
+        lines += ["This was the hourly Hobby-map refit. Nobody is waiting on it; it runs again next hour.",
+                  "Only act if it keeps failing every hour: sudo journalctl -u hfes-match-worker --since '3 hours ago'"]
+    elif not pending:
+        lines += ["This was a FULL rebuild. The old map is still being served. Re-run it in a quiet moment:",
+                  "  curl -XPOST -H \"X-Rebuild-Token: $HFES_REEMBED_TOKEN\" http://localhost/api/profile  # (on the server, after: set -a; . /etc/hfes-match.env)".replace("/api/profile", "/api/admin/rebuild")]
+    else:
+        lines += [f"{len(pending)} profile(s) are NOT on the map yet (their browsers have been told to email you):",
+                  *[f"  - {p.get('name', '?')} ({p.get('aff', '')}) id {p.get('personId') or p.get('profileId')}" for p in pending], "",
+                  "WHAT TO DO", "1. Check the site is up: https://d1j7v5u0jmb8lf.cloudfront.net/api/health",
+                  "2. On the server (ssh hfe-peapod), paste these to queue each person again through the normal path:"]
+        for p in pending:
+            body = json.dumps({k: p.get(k, "") for k in ("profileId", "personId", "name", "aff", "bio", "sideInterest")} | {"isStudent": bool(p.get("isStudent"))})
+            lines.append("  curl -s -XPOST -H 'Content-Type: application/json' http://localhost/api/profile -d " + shlex.quote(body))
+        lines += ["3. Wait ~10 s, then check http://localhost/api/rebuild shows status complete.",
+                  "4. If it fails AGAIN with the same error, it is a bug, not a hiccup: stop retrying and send this email",
+                  "   plus the output of: sudo journalctl -u hfes-match -u hfes-match-worker --since '1 hour ago'"]
+    return "\n".join(lines)
 
 
 def _arm_timer(job_id: str, delay: float) -> None:
@@ -611,11 +592,8 @@ def _arm_timer(job_id: str, delay: float) -> None:
 
 
 def _merge_pending(existing_detail: str | None, profile: dict) -> str:
-    """Fold one changed profile into a queued job's pending-placements list, deduped by
-    person so editing twice inside the quiet window only places them once, with the latest text."""
+    """Add a changed profile to a queued job's pending list, deduped by person (latest text wins)."""
     try:
-        # Same pre-upgrade-format guard as start_rebuild's worker: a legacy plain-string
-        # reason isn't JSON — treat it as an empty pending list rather than crashing.
         pending = json.loads(existing_detail) if existing_detail else []
     except (json.JSONDecodeError, TypeError):
         pending = []
@@ -628,17 +606,9 @@ def _merge_pending(existing_detail: str | None, profile: dict) -> str:
 
 
 def queue_rebuild(profile: dict) -> dict:
-    """Queue this profile for incremental placement without letting web traffic start model work.
-
-    Several edits inside the quiet window coalesce into one job's pending list (deduped by
-    person) rather than causing several expensive subprocess calls.  Each pending profile is
-    later placed with its own `embed_umap.py incremental` call — the position is frozen once
-    placed, so this never refits UMAP or moves anyone else's dot.  The current static embedding
-    file remains live meanwhile.
-    """
-    # Read-then-decide must be atomic: two signups in the same millisecond both saw "no job"
-    # and each inserted one, but only the last-armed timer fires, stranding the other job
-    # (its people never placed). Found by k6_signup_test.js, 2026-09-28. RLock, so tx() nests.
+    """Queue this profile for incremental placement. Edits inside the quiet window coalesce into one job."""
+    # Read-then-decide must be atomic: two signups in the same millisecond would each insert a job
+    # and only the last-armed timer would fire. RLock, so tx() nests.
     with STORE.lock:
         current = STORE.current_job()
         if current and current["status"] in ("queued", "running"):
@@ -650,10 +620,7 @@ def queue_rebuild(profile: dict) -> dict:
                 if REBUILD_DELAY_SECONDS:
                     _arm_timer(current["job_id"], REBUILD_DELAY_SECONDS)
                 return {"queued": True, "jobId": current["job_id"], "coalesced": True}
-            # A rebuild is already running for an earlier edit. This edit needs its
-            # own follow-up job so it isn't silently dropped once the running one
-            # finishes; further edits before that follow-up fires coalesce into it
-            # via the "queued" branch above.
+            # A rebuild is running: this edit needs its own follow-up job or it's dropped.
             job_id = secrets.token_urlsafe(12)
             with STORE.tx() as db:
                 db.execute("INSERT INTO jobs(job_id,status,requested_at,detail) VALUES(%s,%s,%s,%s)",
@@ -681,6 +648,36 @@ def json_response(status, body):
     resp.status_code = int(status)
     resp.headers["Cache-Control"] = "no-store"
     return resp
+
+
+# Anonymous usage counters for /dashboard-traffic: one row per UTC minute per kind, incremented by a
+# fire-and-forget beacon from index.html (track()) or by the server itself. Deliberately stores no IP,
+# user agent, person id, search text or exact timestamp — nothing in this table can be traced back.
+EVENT_KINDS = frozenset("""
+open_first open_returning lookup_found lookup_suggested lookup_none claimed created edit
+draft_bio_ok draft_bio_none search open_person open_program save_contact save_program show_more
+view_everyone view_student view_side faq placement_failed placement_timeout
+askhobby_added askhobby_skip askbio_ok askbio_edit open_hobby
+""".split())
+
+
+def bump(kind: str) -> None:
+    if kind not in EVENT_KINDS:
+        return
+    try:
+        with STORE.tx() as db:
+            db.execute("INSERT INTO metrics(bucket,kind,n) VALUES(%s,%s,1) "
+                       "ON CONFLICT (bucket,kind) DO UPDATE SET n = metrics.n + 1", (utcnow()[:16], kind))
+    except Exception as exc:  # a counter must never break a real request
+        print(f"bump: {exc}", file=sys.stderr)
+
+
+def admin_ok(dashboard: bool = False) -> bool:
+    given = request.headers.get("X-Rebuild-Token", "") or request.args.get("token", "")
+    ok = bool(ADMIN_TOKEN) and secrets.compare_digest(given, ADMIN_TOKEN)
+    if dashboard and DASHBOARD_TOKEN:
+        ok = ok or secrets.compare_digest(given, DASHBOARD_TOKEN)
+    return ok
 
 
 def read_json():
@@ -733,7 +730,18 @@ def api_matches():
 
 @app.get("/api/placement")
 def api_placement():
-    return json_response(HTTPStatus.OK, CATALOGUE.placement(request.args.get("personId", "")))
+    person_id = request.args.get("personId", "")
+    result = CATALOGUE.placement(person_id)
+    if not result["placed"] and person_id:
+        # Not on the map yet: is that because their job is still being retried, or finally failed?
+        needle = f"%{json.dumps(person_id)}%"  # the id as it appears quoted inside the pending JSON
+        with STORE.tx() as db:
+            job = db.execute("SELECT status, attempts FROM jobs WHERE pending LIKE %s OR detail LIKE %s "
+                             "ORDER BY requested_at DESC LIMIT 1", (needle, needle)).fetchone()
+        if job:
+            result["jobStatus"] = job["status"]
+            result["failed"] = job["status"] == "failed"
+    return json_response(HTTPStatus.OK, result)
 
 
 @app.get("/api/rebuild")
@@ -784,7 +792,74 @@ def api_draft_bio():
     aff = str(body.get("aff", "")).strip()[:500]
     if not name:
         return json_response(HTTPStatus.BAD_REQUEST, {"error": "Name is required."})
-    return json_response(HTTPStatus.OK, {"bio": draft_bio(name, aff)})
+    bio = draft_bio(name, aff)
+    bump("draft_bio_ok" if bio else "draft_bio_none")
+    return json_response(HTTPStatus.OK, {"bio": bio})
+
+
+@app.post("/api/event")
+def api_event():
+    try:
+        kind = str(read_json().get("kind", ""))
+    except json.JSONDecodeError:
+        kind = ""
+    if kind not in EVENT_KINDS:
+        return json_response(HTTPStatus.BAD_REQUEST, {"error": "Unknown event kind."})
+    bump(kind)
+    return ("", HTTPStatus.NO_CONTENT, {"Cache-Control": "no-store"})
+
+
+@app.get("/api/stats")
+def api_stats():
+    if not admin_ok(dashboard=True):
+        return json_response(HTTPStatus.FORBIDDEN, {"error": "Invalid token."})
+    # ?from=YYYY-MM-DD&to=YYYY-MM-DD (UTC calendar days, inclusive; the page pads a day each side and
+    # regroups in its chosen zone). ?days=N still works. Capped at 90 days of buckets per call.
+    day = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+    to = request.args.get("to", "") if day.match(request.args.get("to", "")) else datetime.now(timezone.utc).date().isoformat()
+    if day.match(request.args.get("from", "")):
+        since = request.args["from"]
+    else:
+        days = max(1, min(90, int(request.args.get("days", "4") or 4)))
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
+    since = max(since, (datetime.fromisoformat(to) - timedelta(days=90)).date().isoformat())
+    until = to + "T24"  # string compare: everything bucketed on `to`
+    with STORE.tx() as db:
+        metrics = [dict(r) for r in db.execute("SELECT bucket, kind, n FROM metrics WHERE bucket >= %s AND bucket < %s ORDER BY bucket", (since, until)).fetchall()]
+        # Derived from the edit ledger, not from browser beacons, so they count PEOPLE and CHANGES rather than
+        # taps: first_claimed / first_created = a profile's earliest edit row (its first claim or creation —
+        # one per person, ever); profile_edit = every later row (a real change to name/aff/bio/hobby/student).
+        # Same {bucket, kind, n} shape as metrics so the chart, tiles and kinds table need no special casing.
+        metrics += [dict(r) for r in db.execute("""
+            WITH firsts AS (SELECT e.profile_id, p.person_id, min(e.created_at) AS first_at FROM profile_edits e
+                            JOIN profiles p USING (profile_id) GROUP BY e.profile_id, p.person_id)  -- by profile only: a person_id can change across rows
+            SELECT left(first_at, 16) AS bucket,
+                   CASE WHEN person_id ~ '^[0-9]+$' THEN 'first_claimed' ELSE 'first_created' END AS kind, count(*) AS n
+            FROM firsts WHERE first_at >= %s AND first_at < %s GROUP BY 1, 2
+            UNION ALL
+            SELECT left(e.created_at, 16), 'profile_edit', count(*)
+            FROM profile_edits e JOIN firsts f ON f.profile_id = e.profile_id
+            WHERE e.created_at > f.first_at AND e.created_at >= %s AND e.created_at < %s GROUP BY 1
+            ORDER BY 1""", (since, until, since, until)).fetchall()]
+        jobs = [dict(r) for r in db.execute(
+            "SELECT left(requested_at, 13) AS hour, status, count(*) AS n FROM jobs WHERE requested_at >= %s AND requested_at < %s GROUP BY 1, 2 ORDER BY 1",
+            (since, until)).fetchall()]
+        profiles = db.execute("SELECT count(*) AS n FROM profiles").fetchone()["n"]
+        students = db.execute("SELECT count(*) AS n FROM profiles WHERE is_student = 1").fetchone()["n"]
+        # The people list for the dashboard (newest first). "claimed" = an attendee from the programme
+        # (numeric Person ID); "created" = a brand-new signup (random id). ponytail: the id shape is the tell.
+        # "when" = first seen (earliest edit row, i.e. the claim/creation); "edited" = last change if any
+        # later edit happened, with how many — so a bio edit no longer floats someone up as a "new" signup.
+        people = [{"name": r["name"], "aff": r["affiliation"], "when": r["first_at"] or r["updated_at"],
+                   "edited": r["updated_at"] if r["edits"] > 1 else None, "edits": max(r["edits"] - 1, 0),
+                   "kind": "claimed" if (r["person_id"] or "").isdigit() else "created",
+                   "student": bool(r["is_student"]), "hobby": (r["side_interest"] or "")[:80]}
+                  for r in db.execute("""SELECT p.name, p.affiliation, p.person_id, p.is_student, p.side_interest, p.updated_at,
+                                                (SELECT min(created_at) FROM profile_edits e WHERE e.profile_id=p.profile_id) AS first_at,
+                                                (SELECT count(*) FROM profile_edits e WHERE e.profile_id=p.profile_id) AS edits
+                                         FROM profiles p ORDER BY first_at DESC NULLS LAST, p.updated_at DESC LIMIT 2000""").fetchall()]
+    return json_response(HTTPStatus.OK, {"since": since, "until": to, "metrics": metrics, "jobs": jobs, "profilesTotal": profiles, "studentsTotal": students, "people": people,
+                                         "generatedAt": utcnow()})
 
 
 @app.post("/api/client-error")
@@ -800,7 +875,7 @@ def api_client_error():
         if now - _last_client_error_alert >= CLIENT_ERROR_COOLDOWN_SECONDS:
             _last_client_error_alert = now
             send_alert_email(
-                subject="[HFE Peapod] Attendees are seeing a load error",
+                subject="[CHI Peapod] Attendees are seeing a load error",
                 body=(
                     "A browser reported it could not load the app's data (CSVs/embeddings) "
                     f"at all — attendees are seeing the 'Error! :(' screen.\n\nDetail:\n{message}\n\n"
@@ -811,15 +886,10 @@ def api_client_error():
     return json_response(HTTPStatus.OK, {"ok": True})
 
 def side_refit_due() -> bool:
-    """Pure/testable: true if the side-interest space's last full refit is old enough (or has
-    never happened at all) to warrant another one. Reads only side_umap_positions.json's own
-    generated_at — no side effects, no dependence on the rebuild lock or job queue, so this can
-    be asserted against directly without spinning up a subprocess or a model load."""
+    """True if the side space has never been fitted or its last fit is older than the interval."""
     path = ROOT / "side_umap_positions.json"
     if not path.exists():
-        # Never fitted yet — includes "nobody's opted in at all," in which case the periodic
-        # attempt below is cheap: embed_umap.py skips before ever loading the model if there
-        # aren't enough people, so this isn't wasted work, just a quick no-op most cycles.
+        # Never fitted; embed_umap.py exits early if too few people have opted in, so this is cheap.
         return True
     try:
         generated_at = json.loads(path.read_text()).get("generated_at")
@@ -832,23 +902,15 @@ def side_refit_due() -> bool:
 
 
 def _daemon_timer(delay: float, fn) -> None:
-    # Non-daemon timers keep a gunicorn worker alive after SIGTERM until graceful_timeout kills it,
-    # turning every restart into ~30 s of downtime.
+    # Non-daemon timers would hold a gunicorn worker open after SIGTERM (~30 s downtime per restart).
     t = threading.Timer(delay, fn)
     t.daemon = True
     t.start()
 
 
 def periodic_side_refit_check() -> None:
-    """Runs every SIDE_REFIT_CHECK_SECONDS, forever, on a daemon timer. Silent by design — same
-    as any other rebuild, nothing announces this to users; it only ever shows up in GET
-    /api/rebuild's job history and (only on failure) the alert email.
-
-    Mindful of the existing queue rather than competing with it: if a real edit's incremental
-    placement is already queued or running, this cycle skips entirely and simply checks again
-    next time — it never preempts, cancels, or races a user-driven rebuild. Only the Hobby space
-    is touched (see embed_umap.py's --side-only) — the academic map never refits on this cadence.
-    """
+    """Every SIDE_REFIT_CHECK_SECONDS: refit the Hobby space if due. Skips the cycle when a user-driven
+    job is queued or running."""
     try:
         current = STORE.current_job()
         if current and current["status"] in ("queued", "running"):
@@ -860,8 +922,7 @@ def periodic_side_refit_check() -> None:
 
 
 def new_feed_people() -> list[dict] | None:
-    """Pending-list entries for people in authors.csv who have no embedding yet, or None when
-    nothing has been embedded at all (first sync — that needs a full fit, not 9,000 placements)."""
+    """People in authors.csv with no embedding yet; None when nothing is embedded at all (needs a full fit)."""
     ids_path = ROOT / "embeddings_person_ids.json"
     if not ids_path.exists():
         return None
@@ -869,17 +930,14 @@ def new_feed_people() -> list[dict] | None:
     with open(ROOT / "authors.csv", encoding="utf-8-sig", newline="") as f:
         return [{"personId": r["Person ID"], "profileId": r["Person ID"], "name": r["Author"],
                  "bio": r["s_profile"] or r["Interest Profile"] or r["Author"], "sideInterest": r.get("Side Interest", "")}
-                # Chairs with no papers have no text; a dot placed from a name alone means nothing.
+                # Chairs with no papers have no text to place.
                 for r in csv.DictReader(f) if r.get("Person ID") and r["Person ID"] not in embedded
                 and (r["s_profile"] or r["Interest Profile"])]
 
 
 def periodic_feed_check() -> None:
-    """Every FEED_CHECK_SECONDS: if the CHI feed has a new revision, rewrite authors.csv /
-    program.csv from it and place only the people who are new. Existing dots never move —
-    same frozen-map rule as signups; changed abstracts wait for the next deliberate full run.
-    Holds REBUILD_LOCK while writing, because jobs write authors.csv too; a busy lock just
-    means try again next cycle."""
+    """Every FEED_CHECK_SECONDS: on a new feed revision, rewrite the CSVs and place only new people.
+    Existing dots never move; changed abstracts wait for a deliberate full run."""
     try:
         if not REBUILD_LOCK.acquire(blocking=False):
             return
@@ -902,27 +960,19 @@ def periodic_feed_check() -> None:
                     (job_id, "queued", utcnow(), json.dumps(pending)))
             start_rebuild(job_id)
     except Exception as exc:
-        # A feed outage must never take the app down — the last good files keep serving.
+        # A feed outage only logs; the last good files keep serving.
         print(f"periodic_feed_check: {exc.__class__.__name__}: {exc}", flush=True)
     finally:
         _daemon_timer(FEED_CHECK_SECONDS, periodic_feed_check)
 
 
 def recover_jobs() -> None:
-    """Re-arm the quiet-window timer after a service restart.
-
-    The timer counting down a queued rebuild lives only in process memory; a
-    restart (deploy, crash, reboot) loses it while the job row survives in
-    SQLite as still "queued" or "running", with nothing left to ever start it.
-    """
+    """After a restart: fail the job that was running, re-arm the timer for a queued one."""
     job = STORE.current_job()
     if not job:
         return
     if job["status"] == "running":
-        # The process that was running this rebuild is gone; nothing will ever
-        # flip it to complete/failed, and REBUILD_LOCK is a fresh, unheld lock
-        # in this new process, so a stuck "running" row would otherwise block
-        # queue_rebuild's running-vs-queued branching forever.
+        # Nothing will ever finish it, and a stuck "running" row blocks queue_rebuild forever.
         with STORE.tx() as db:
             db.execute("UPDATE jobs SET status='failed',finished_at=%s,detail=%s WHERE job_id=%s",
                 (utcnow(), "Interrupted by service restart.", job["job_id"]))
@@ -934,22 +984,22 @@ def recover_jobs() -> None:
 
 
 def start_background() -> None:
-    """Once per server process: re-arm any queued job lost to the restart, then start the
-    periodic Hobby-space refit check (short initial delay so it doesn't compete with startup)."""
+    """Once per process: recover jobs, then start the periodic timers."""
     recover_jobs()
-    _daemon_timer(SIDE_REFIT_INITIAL_DELAY_SECONDS, periodic_side_refit_check)
+    if SIDE_REFIT_CHECK_SECONDS:
+        _daemon_timer(SIDE_REFIT_INITIAL_DELAY_SECONDS, periodic_side_refit_check)
     if FEED_CHECK_SECONDS:
         _daemon_timer(5, periodic_feed_check)
 
 
 def main():
-    """Local development only — production runs gunicorn (see deploy/gunicorn.conf.py)."""
+    """Local development only; production runs gunicorn."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     args = parser.parse_args()
     start_background()
-    print(f"HFES API listening on {args.host}:{args.port}", flush=True)
+    print(f"CHI Peapod API listening on {args.host}:{args.port}", flush=True)
     app.run(host=args.host, port=args.port, threaded=True, debug=False)
 
 if __name__ == "__main__":

@@ -1,26 +1,8 @@
 #!/usr/bin/env python3
-"""Pull the CHI programme feed (chidigitalexperience.org) and write the files the app reads.
+"""Pull the CHI programme feed and write authors.csv, program.csv and embed_text.json.
 
-The rest of the app was built for HFES's two CSV exports, so this converts the feed into that
-same shape instead of teaching every consumer a new format:
-
-  authors.csv      one row per person who authored a content item or chairs a session —
-                   Author, Affiliation, Person ID, Schedule Detail, Interest Profile (the displayed
-                   bio: a "**At CHI**" headline + their titles), Presentation Titles. Fetched by
-                   the browser, so it deliberately carries NO abstracts (they'd make it ~15 MB).
-  program.csv      one row per (content, session): Date/Day/Start/End in the conference's own
-                   timezone, Location, Session Name/Type, Presentation Title, Authors, Chairs,
-                   Presentation ID, Program URL (DOI).
-  embed_text.json  {person_id: [displayed_bio, text_to_embed]} — titles + abstracts, what
-                   embed_umap.py actually embeds for a feed person (see embed_umap.feed_text()).
-                   Server-side only; the browser never fetches it.
-
-Polling follows the feed's own protocol: read the small version.json, and only when its
-`revision` changed fetch the immutable revision_url (latest.json is browser-cached for up to
-10 minutes, revisions are not). Data © ACM CHI, CC BY-NC-SA 4.0 — the app shows the attribution.
-
-  python3 chi_feed.py                      # sync once from HFES_FEED_EDITION (default chi2026)
-  python3 chi_feed.py --edition sandbox    # the feed's test data
+Polls version.json; fetches the immutable revision_url only when `revision` moves.
+    python3 chi_feed.py [--edition chi2026|sandbox|chi2027] [--force]
 """
 import argparse
 import csv
@@ -74,8 +56,7 @@ def person_name(p: dict) -> str:
 
 def convert(feed: dict, edition: str = "") -> tuple[list[dict], list[dict], dict]:
     """Pure: feed JSON -> (author rows, program rows, embed_text). No I/O, so it's testable."""
-    # The feed stores local wall-clock time as if it were UTC (CHI 2025's 8:45 opening plenary is
-    # 08:45Z in the sandbox; chi2026's 9:00 sessions are 09:00Z), so format in UTC and ignore timeZoneName.
+    # Feed epochs are local wall-clock stored as UTC (CHI 2025's 8:45 plenary is 08:45Z): format in UTC.
     tz = timezone.utc
     people = {p["id"]: p for p in feed["people"]}
     rooms = {r["id"]: _clean(r["name"]) for r in feed.get("rooms", [])}
@@ -110,8 +91,7 @@ def convert(feed: dict, edition: str = "") -> tuple[list[dict], list[dict], dict
         end = datetime.fromtimestamp(slot["endDate"] / 1000, tz)
         date, times = start.strftime("%Y-%m-%d"), f"{_clock(start)}-{_clock(end)}"
         room, sname = rooms.get(s.get("roomId")) or "TBA", _clean(s["name"])
-        # No status field in the feed; the sandbox flags withdrawals as addons.cancelled. Keep the row
-        # visible with a label so a saved talk reads as cancelled rather than silently vanishing.
+        # No status field in the feed; a withdrawn session is addons.cancelled. Label it, don't hide it.
         if (s.get("addons") or {}).get("cancelled") and "cancel" not in sname.lower():
             sname = "CANCELLED: " + sname
         chairs = [people[i] for i in (s.get("chairIds") or []) if i in people]
@@ -125,8 +105,7 @@ def convert(feed: dict, edition: str = "") -> tuple[list[dict], list[dict], dict
             names = [person_name(people[a["personId"]]) for a in (c.get("authors") or []) if a["personId"] in people]
             for a in (c.get("authors") or []):
                 sched.setdefault(a["personId"], []).append(f"{date} {times} · {room} · {sname} · {title} [Author]")
-            # DOI when there is one; otherwise the item's page on the official programme site
-            # (61 chi2026 items: journals, some posters, awards, keynotes). "sandbox" has no site.
+            # DOI when there is one, else the item's page on programs.sigchi.org (sandbox has none)
             doi = ((c.get("addons") or {}).get("doi") or {}).get("url", "") or (
                 f"https://programs.sigchi.org/{site.group(1)}/{site.group(2)}/program/content/{cid}" if site else "")
             program.append({
@@ -177,8 +156,7 @@ def sync(edition: str = EDITION, force: bool = False) -> dict:
     _atomic_write_text(ROOT / "program.csv", _csv(program, PROGRAM_FIELDS))
     _atomic_write_text(EMBED_TEXT_PATH, json.dumps(embed_text))
     _atomic_write_text(ROOT / "authors.csv", _csv(authors, AUTHOR_FIELDS))
-    # The feed rewrite just dropped every attendee's own edits and every new signup from the CSV;
-    # put them straight back (the database is their source of truth) before anyone reads it.
+    # the rewrite just dropped every claimed edit and signup; put them back from the database
     try:
         materialize_db_edits()
     except Exception as exc:  # no database (local one-off run) — the next job re-applies them anyway
