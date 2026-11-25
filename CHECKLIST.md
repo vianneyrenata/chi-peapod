@@ -170,7 +170,9 @@ Postgres; existing dots never move.
 
 ## Scoring (UX 25, novelty 25, inclusion & accessibility 25, CHI relevance 15, technical 10)
 - [x] Dark Mode, keyboard access, dialog focus, map label, contrast (ported from hfe-peapod 2026-09-28)
-- [ ] VoiceOver pass on a real iPhone
+- [~] VoiceOver: screen-reader path added 2026-11-25 (skip link to Top matches, main landmark, section headings,
+      row labels "name, affiliation, N percent match", live announcement when matches land, FAQ entry; axe clean
+      bar one region warning). Still needs a pass on a real iPhone
 - [ ] Recheck 320 px layout with CHI's longer names / affiliations
 - [ ] Look at earlier CHI apps for the novelty story
 

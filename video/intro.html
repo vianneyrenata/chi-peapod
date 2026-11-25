@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Peapod intro</title>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;900&display=swap" rel="stylesheet">
+<style>
+  html,body{margin:0;width:1920px;height:1080px;overflow:hidden;background:#15171c;font-family:Nunito,system-ui,sans-serif;color:#f4f1ea}
+  #stage{position:absolute;inset:0}
+  .dot{position:absolute;width:18px;height:18px;border-radius:50%;transform:translate(-50%,-50%);transition:left 3.2s cubic-bezier(.4,0,.2,1),top 3.2s cubic-bezier(.4,0,.2,1),opacity 1.2s,background 1.5s;opacity:0}
+  .you{width:30px;height:30px;background:#4b8fe8;box-shadow:0 0 0 6px rgba(75,143,232,.25),0 0 40px #4b8fe8;z-index:5}
+  .cap{position:absolute;left:0;right:0;text-align:center;font-weight:900;font-size:64px;line-height:1.2;opacity:0;transition:opacity .9s;text-shadow:0 2px 24px rgba(0,0,0,.6);padding:0 220px}
+  .cap.small{font-size:38px;font-weight:700;color:#d9d4c7}
+  .bubble{position:absolute;background:#f4f1ea;color:#15171c;font-weight:700;font-size:26px;padding:12px 20px;border-radius:22px;opacity:0;transform:translateY(12px);transition:opacity .5s,transform .5s;white-space:nowrap}
+  .bubble:after{content:"";position:absolute;left:28px;bottom:-12px;border:12px solid transparent;border-top-color:#f4f1ea;border-bottom:0}
+  #phone{position:absolute;left:50%;top:1120px;width:360px;height:720px;transform:translateX(-50%);background:#fff;border-radius:40px;border:10px solid #2a2d35;transition:top 1.1s cubic-bezier(.3,.8,.3,1);color:#222;overflow:hidden}
+  #phone h3{margin:26px 24px 10px;font-size:22px;font-weight:900;color:#1858b0}
+  #phone .row{margin:0 24px;padding:12px 0;border-bottom:1px solid #e5e5e5;font-size:15px}
+  #phone .row b{display:block;font-size:13px;color:#666;font-weight:700;margin-bottom:2px}
+  #brand{position:absolute;left:50%;top:120px;transform:translateX(-50%);text-align:center;opacity:0;transition:opacity 1s;padding:40px 120px 50px;border-radius:40px;background:radial-gradient(ellipse at center,rgba(21,23,28,.98) 55%,rgba(21,23,28,0) 100%)}
+  #brand img{width:220px}
+  #brand h1{margin:10px 0 4px;font-size:84px;font-weight:900;letter-spacing:-1px}
+  #brand p{margin:0;font-size:38px;font-weight:700;color:#d9d4c7}
+</style></head><body>
+<div id="stage"></div>
+<div id="c1" class="cap" style="top:120px">CHI is enormous now.</div>
+<div id="c2" class="cap small" style="top:220px">Thousands of people. More fields than anyone can follow.</div>
+<div id="c3" class="cap" style="top:120px">You find the people you already know.</div>
+<div id="c4" class="cap small" style="top:220px">And you stay with them.</div>
+<div id="c5" class="cap" style="top:120px">The programme can tell you what's on.</div>
+<div id="c6" class="cap small" style="top:220px">It can't tell you who's here.</div>
+<div id="b1" class="bubble">how was your travel?</div>
+<div id="b2" class="bubble">how do you find the conference so far?</div>
+<div id="b3" class="bubble">nice weather, huh</div>
+<div id="phone"><h3>Programme · Tuesday</h3>
+  <div class="row"><b>9:00 · Room 310</b>Interaction Techniques for Mixed Reality</div>
+  <div class="row"><b>9:00 · Room 315</b>Designing with Communities</div>
+  <div class="row"><b>9:00 · Hall A</b>Accessibility and Ageing</div>
+  <div class="row"><b>9:00 · Room 402</b>LLMs in the Workplace</div>
+  <div class="row"><b>11:00 · Room 310</b>Haptics</div>
+  <div class="row"><b>11:00 · Room 315</b>Health and Wellbeing</div>
+  <div class="row"><b>11:00 · Hall A</b>Visualisation</div>
+  <div class="row"><b>11:00 · Room 402</b>Games and Play</div>
+  <div class="row"><b>14:00 · Room 310</b>Tangible Interfaces</div></div>
+<div id="brand"><img src="../img-asset/peapod-mascot-v2.png" alt=""><h1>Peapod</h1><p>People-first, built for connection.</p></div>
+<script>
+const W=1920,H=1080,N=420,stage=document.getElementById('stage');
+const palette=['#e8a26b','#c97bd6','#6fc3a3','#e2d36b','#7ab8e6','#e87b8c','#9bd47a','#d6a37b'];
+let seed=7;const rnd=()=>{seed=(seed*9301+49297)%233280;return seed/233280};
+const dots=[];
+for(let i=0;i<N;i++){const d=document.createElement('div');d.className='dot';d.style.background=palette[i%palette.length];
+  d.style.left=(120+rnd()*(W-240))+'px';d.style.top=(300+rnd()*(H-380))+'px';stage.appendChild(d);dots.push(d);}
+const you=document.createElement('div');you.className='dot you';you.style.left='520px';you.style.top='760px';stage.appendChild(you);
+const friends=dots.slice(0,3);
+const $=id=>document.getElementById(id);const show=(id,on=true)=>{$(id).style.opacity=on?1:0};
+const bub=(id,x,y)=>{const b=$(id);b.style.left=x+'px';b.style.top=y+'px';b.style.opacity=1;b.style.transform='translateY(0)'};
+// gentle drift for the hall
+let drifting=true;setInterval(()=>{if(!drifting)return;dots.forEach((d,i)=>{if(friends.includes(d))return;
+  const x=parseFloat(d.style.left),y=parseFloat(d.style.top);d.style.left=Math.max(100,Math.min(W-100,x+(rnd()-.5)*140))+'px';d.style.top=Math.max(300,Math.min(H-60,y+(rnd()-.5)*140))+'px';});},3200);
+// 8 clusters for the map scene
+const centers=[[380,520],[760,420],[1180,480],[1560,560],[480,860],[900,800],[1300,840],[1640,900]];
+const T=[
+ [0.2,()=>{dots.forEach((d,i)=>setTimeout(()=>d.style.opacity=.75,i*6));you.style.opacity=1;}],
+ [1.5,()=>show('c1')],[3.5,()=>show('c2')],
+ [7.5,()=>{show('c1',false);show('c2',false);friends.forEach((d,i)=>{d.style.left=(520+[-70,60,-10][i])+'px';d.style.top=(760+[-60,-50,70][i])+'px';d.style.opacity=1;});}],
+ [9,()=>show('c3')],[11,()=>show('c4')],
+ [13.5,()=>{bub('b1',1180,600);}],[15,()=>bub('b2',1350,760)],[16.3,()=>bub('b3',800,470)],
+ [18.5,()=>{show('c3',false);show('c4',false);['b1','b2','b3'].forEach(b=>$(b).style.opacity=0);$('phone').style.top='330px';}],
+ [19.5,()=>show('c5')],[22,()=>show('c6')],
+ [25,()=>{show('c5',false);show('c6',false);$('phone').style.top='1120px';drifting=false;
+   dots.forEach((d,i)=>{const c=centers[i%8];const a=rnd()*Math.PI*2,r=40+rnd()*150;d.style.left=(c[0]+Math.cos(a)*r)+'px';d.style.top=(c[1]+Math.sin(a)*r*.7)+'px';d.style.background=palette[i%8];d.style.opacity=.9;});
+   you.style.left='1200px';you.style.top='500px';}],
+ [28.5,()=>{show('brand');dots.forEach(d=>d.style.opacity=.18);}],
+ [33,()=>{dots.forEach((d,i)=>{d.style.opacity=(i%8===2)?.45:.12;});}],
+ [40,()=>{}]
+];
+T.forEach(([t,f])=>setTimeout(f,t*1000));
+</script></body></html>

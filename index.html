@@ -255,6 +255,9 @@
   .map-loading span:nth-child(2){ animation-delay:.18s; } .map-loading span:nth-child(3){ animation-delay:.36s; }
   @keyframes dotPulse{ 0%,80%,100%{ transform:translateY(0); opacity:.35; } 40%{ transform:translateY(-6px); opacity:1; } }
   .empty-note{ font-size:12px; color:var(--gray); text-align:left; padding:8px 4px 10px; line-height:1.45; }
+  .sr-only{ position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+  .skip-link{ position:absolute; left:8px; top:-60px; z-index:1000; background:var(--accent, #1858b0); color:#fff; padding:10px 14px; border-radius:8px; font-weight:700; }
+  .skip-link:focus{ top:8px; }
   .list-title{ font-size:13px; font-weight:700; text-align:left; margin:6px 0 8px; display:flex; align-items:center; gap:6px;}
   .row{
     display:flex; align-items:center; gap:10px;
@@ -347,8 +350,10 @@
 </style>
 </head>
 <body>
+<a class="skip-link" href="#topMatches">Skip to your top matches</a>
+<div id="srStatus" class="sr-only" aria-live="polite"></div>
 <div class="board">
-  <div class="app">
+  <main class="app">
     <!-- 1. Splash -->
     <div class="screen active" data-screen="splash">
       <div class="center">
@@ -532,6 +537,7 @@
           </div>
           <div class="map-explainer" id="mapExplainer">A map of everyone's interests - people working on similar things end up closer together. It's not geography, just how alike people's research focus is.</div>
           <div id="sideViewSelfNotice" style="display:none; font-size:12px; color:var(--gray); margin:6px 4px 0;">You haven't added your non-academic interests yet - add them from your profile to see who shares them.</div>
+          <p class="sr-only">The map is a picture. Everyone on it is also in the Top matches list below, which is the part to use with a screen reader.</p>
           <div class="map-stage" id="mapStage">
             <svg viewBox="0 0 320 190" width="100%" height="170" id="umapSvg" role="img" aria-label="Map of attendees arranged by research similarity. Your closest matches are listed below the map."></svg>
             <div class="map-loading" id="mapLoading" aria-label="Loading map"><span></span><span></span><span></span></div>
@@ -541,12 +547,12 @@
           <div id="hobbyPeople" style="display:none;"></div>
           <div class="cap" id="embeddingsUpdated" style="margin:6px 4px 0; font-weight:400;"></div>
         </div>
-        <div class="list-title"><span aria-hidden="true">⭐</span> Top matches for you</div>
-        <div id="topMatches"></div>
+        <div class="list-title" role="heading" aria-level="2" id="topMatchesTitle"><span aria-hidden="true">⭐</span> Top matches for you</div>
+        <div id="topMatches" tabindex="-1" aria-labelledby="topMatchesTitle"></div>
         <div id="topMatchesMore"></div>
       </div>
       <div id="programSection">
-        <div class="list-title"><span aria-hidden="true">🗓️</span> Top programs for you</div>
+        <div class="list-title" role="heading" aria-level="2"><span aria-hidden="true">🗓️</span> Top programs for you</div>
         <div id="topLectures"></div>
         <div id="topLecturesMore"></div>
       </div>
@@ -574,6 +580,12 @@
         <div style="text-align:left; font-size:13px; color:var(--bio); line-height:1.5;">
           <img src="img-asset/peapod-mascot-v2.png" alt="" style="display:block; width:120px; height:auto; margin:2px auto 14px;">
           <div class="faq-item">
+            <div class="faq-q">Using Peapod with VoiceOver or another screen reader</div>
+            <div class="faq-a">You don't need the map. Everything on it is also in the "Top matches for you" list, closest first,
+              and a "Skip to your top matches" link appears at the top of the page when you tab into it. Each match is a
+              button that reads the person's name, affiliation and how close a match they are, and opens their profile:
+              their bio, what they're presenting, and where and when. "Show more matches" adds more names. The same goes
+              for "Top programs for you". Popups keep focus inside them and Escape closes them.</div>
             <div class="faq-q">What is this app?</div>
             <div class="faq-a">A quick way to find people and talks at CHI that match your interests.
               It reads everyone's conference bio and quietly suggests attendees and sessions you might want to check
@@ -726,7 +738,7 @@
         <div id="bubExtra" style="margin-top:8px;"></div>
       </div>
     </div>
-  </div>
+  </main>
   <button class="feedback-link" onclick="openFeedback()">Share anonymous feedback</button>
   <!-- Required by the feed licence (chidigitalexperience.org/programme-data). -->
   <p class="map-explainer" style="text-align:center; margin-top:10px;">Programme data © ACM CHI, licensed under <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" style="color:inherit;">CC BY-NC-SA 4.0</a></p>
@@ -2265,10 +2277,13 @@ function renderHome(){
     const row = document.createElement('button');
     row.className='row';
     row.onclick = () => { if (!sideViewOn) focusPersonOnMap(p); openBubble(p); };
+    row.setAttribute('aria-label', `${p.name}${p.aff ? ', ' + p.aff : ''}, ${p.score} percent match. Opens their profile.`);
     row.innerHTML = `<div class="rowname">${nameHtml(p)}</div>
       <div class="score">${p.score}%</div>`;
     tm.appendChild(row);
   });
+  const sr = document.getElementById('srStatus');
+  if (sr && scored.length) sr.textContent = `You're on the map. ${scored.length} top matches listed below, closest first. Each one opens a profile you can read.`;
   if (!scored.length){
     // HIG "Writing": a blank area needs a next step, not silence.
     tm.innerHTML = `<div class="empty-note">${sideViewOn

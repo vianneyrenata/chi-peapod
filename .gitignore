@@ -16,3 +16,4 @@ feed_revision.json
 *umap_reducer.joblib
 
 profile_pipeline/output/
+video/build/
