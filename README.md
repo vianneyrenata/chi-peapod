@@ -5,6 +5,8 @@ This is an entry for the CHI Digital Experience competition, adapted from HFE Pe
 
 Data comes from the public CHI programme feed (https://chidigitalexperience.org/programme-data/, CC BY-NC-SA 4.0). The app downloads and rebuilds the data and embedding.
 
+The live demo currently runs on the **CHI 2026** programme (https://chidigitalexperience.org/data/chi2026/latest.json), because the CHI 2027 feed (`/data/chi2027/`) is not published yet. The server re-checks the feed every 15 minutes and will switch to CHI 2027 once that feed is live, by changing one setting (`HFES_FEED_EDITION=chi2027`) and running a full rebuild.
+
 To view a live demo of the CHI application, please visit: https://d152a4pgizvo84.cloudfront.net
 
 For a detailed information how peapod was made, the design decisions behind it, how we are handling errors in general, and how people were using it, please visit: https://vianneyrenata.com/peapod
