@@ -1,0 +1,7 @@
+# Top-level deps; deploy/requirements-frozen.txt has the exact versions used on the server.
+flask
+gunicorn
+numpy
+psycopg[binary]
+sentence-transformers
+umap-learn
