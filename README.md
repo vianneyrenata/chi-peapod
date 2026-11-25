@@ -1,27 +1,18 @@
 # CHI Peapod
 
-A small web app for finding people at CHI 2027 whose work is close to yours.
+Find the people at ACM CHI 2027 (Pittsburgh, May 10–14) whose work is closest to yours. Every author and session chair in the official programme gets a dot on a map built from their titles and abstracts. The map helps you to find yourself, see your nearest neighbours, and save programme items. 
+This is an entry for the CHI Digital Experience competition, adapted from HFE Peapod, that was piloted in the Human Factors & Ergonomics Society (HFES) ASPIRE 2026 conference, Oct 19-25, 2026.
 
-Every author and session chair in the official programme is a dot on a map. The map comes from
-embedding their paper titles and abstracts, so people who work on similar things end up near each
-other. You look yourself up, see who's nearby, read what they're presenting, and save the talks you
-want to go to. There's no messaging on purpose — the point is to give you a reason to walk up to
-someone in the hallway.
+Data comes from the public CHI programme feed (https://chidigitalexperience.org/programme-data/, CC BY-NC-SA 4.0). The app downloads and rebuilds the data and embedding.
 
-I built the first version for HFES 2026 (HFE Peapod). This is the CHI version, entered in the
-CHI Digital Experience competition. CHI 2027 is May 10–14 in Pittsburgh.
+To view a live demo of the CHI application, please visit: d152a4pgizvo84.cloudfront.net
+For a detailed information how peapod was made, the design decisions behind it, and how we are handling errors in general, please visit: vianneyrenata.com/peapod
+This submission is extensively developed with Anthropic's Claude on the coding side. However, the insights, design decisions and the peapod logo are original.
 
-## Where the data comes from
+## Run it locally
 
-Everything about people and talks comes from the public CHI programme feed
-(https://chidigitalexperience.org/programme-data/), which is CC BY-NC-SA 4.0. The app polls it and
-rebuilds its own files from it; none of that data is in this repo. Anything you type into your own
-profile stays on the app's server and nowhere else.
-
-## Running it
-
-You need Python 3.12 or newer, PostgreSQL, and about 3 GB of RAM for the first build (it embeds
-~10k people and fits a UMAP).
+Needs Python 3.12+, PostgreSQL, and ~3 GB of RAM for the first build (sentence-transformers + UMAP
+over ~10k people).
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
