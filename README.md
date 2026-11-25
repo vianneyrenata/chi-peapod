@@ -1,3 +1,5 @@
+<p align="center"><img src="img-asset/peapod.svg" alt="Peapod" width="160"></p>
+
 # CHI Peapod
 
 Find the people at ACM CHI 2027 (Pittsburgh, May 10–14) whose work is closest to yours. Every author and session chair in the official programme gets a dot on a map built from their titles and abstracts. The map helps you to find yourself, see your nearest neighbours, and save programme items. 
