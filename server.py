@@ -313,8 +313,12 @@ class Catalogue:
         self.reload()
 
     def reload(self) -> None:
-        with open(ROOT / "authors.csv", encoding="utf-8-sig", newline="") as handle:
-            rows = list(csv.DictReader(handle))
+        try:
+            with open(ROOT / "authors.csv", encoding="utf-8-sig", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+        except FileNotFoundError:  # fresh box: the feed poller writes it within seconds, then reloads
+            print("authors.csv missing; serving an empty catalogue until the first feed sync", flush=True)
+            rows = []
         # Same bio precedence as embed_umap.py's bio_text().
         people = {r["Person ID"]: {"personId": r["Person ID"], "name": r["Author"], "aff": r["Affiliation"],
             "bio": r.get("s_profile") or r.get("Interest Profile") or r.get("Presentation Titles") or "No profile on file.",
