@@ -25,13 +25,14 @@ Polling follows the feed's own protocol: read the small version.json, and only w
 import argparse
 import csv
 import io
+import html
 import json
 import os
 import re
+import unicodedata
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).parent
 FEED_BASE = "https://chidigitalexperience.org/data"
@@ -57,7 +58,10 @@ def _get_json(url: str, timeout: float = 60):
 def _clean(s) -> str:
     # " · " and "|" are Schedule Detail's separators and "[...]" ends it (see SCHEDULE_RE in
     # index.html); a title containing them would silently fail to parse.
-    return re.sub(r"\s+", " ", str(s or "")).replace("·", "-").replace("|", "/").replace("[", "(").replace("]", ")").strip()
+    s = html.unescape(str(s or ""))                       # sandbox has "&amp;" / "&lt;" in a title
+    s = re.sub(r"[\ufeff\u200b-\u200f]", "", s)             # BOM / zero-width marks inside names
+    s = s.lstrip("".join(c for c in s[:3] if unicodedata.category(c).startswith("M")))  # stray leading diacritic
+    return re.sub(r"\s+", " ", s).replace("·", "-").replace("|", "/").replace("[", "(").replace("]", ")").strip()
 
 
 def _clock(dt: datetime) -> str:
@@ -70,7 +74,9 @@ def person_name(p: dict) -> str:
 
 def convert(feed: dict, edition: str = "") -> tuple[list[dict], list[dict], dict]:
     """Pure: feed JSON -> (author rows, program rows, embed_text). No I/O, so it's testable."""
-    tz = ZoneInfo(feed["conference"].get("timeZoneName") or "UTC")
+    # The feed stores local wall-clock time as if it were UTC (CHI 2025's 8:45 opening plenary is
+    # 08:45Z in the sandbox; chi2026's 9:00 sessions are 09:00Z), so format in UTC and ignore timeZoneName.
+    tz = timezone.utc
     people = {p["id"]: p for p in feed["people"]}
     rooms = {r["id"]: _clean(r["name"]) for r in feed.get("rooms", [])}
     slots = {t["id"]: t for t in feed.get("timeSlots", [])}
@@ -87,11 +93,11 @@ def convert(feed: dict, edition: str = "") -> tuple[list[dict], list[dict], dict
     for c in feed["contents"]:
         if c.get("isBreak"):
             continue
-        for a in c.get("authors", []):
+        for a in (c.get("authors") or []):
             pid = a["personId"]
             titles.setdefault(pid, []).append(_clean(c["title"]))
             abstracts.setdefault(pid, []).append(_clean(c.get("abstract")))
-            for af in a.get("affiliations", []):
+            for af in (a.get("affiliations") or []):
                 inst = _clean(af.get("institution"))
                 if inst and inst not in affs.setdefault(pid, []):
                     affs[pid].append(inst)
@@ -104,20 +110,24 @@ def convert(feed: dict, edition: str = "") -> tuple[list[dict], list[dict], dict
         end = datetime.fromtimestamp(slot["endDate"] / 1000, tz)
         date, times = start.strftime("%Y-%m-%d"), f"{_clock(start)}-{_clock(end)}"
         room, sname = rooms.get(s.get("roomId")) or "TBA", _clean(s["name"])
-        chairs = [people[i] for i in s.get("chairIds", []) if i in people]
-        for i in s.get("chairIds", []):
+        # No status field in the feed; the sandbox flags withdrawals as addons.cancelled. Keep the row
+        # visible with a label so a saved talk reads as cancelled rather than silently vanishing.
+        if (s.get("addons") or {}).get("cancelled") and "cancel" not in sname.lower():
+            sname = "CANCELLED: " + sname
+        chairs = [people[i] for i in (s.get("chairIds") or []) if i in people]
+        for i in (s.get("chairIds") or []):
             sched.setdefault(i, []).append(f"{date} {times} · {room} · {sname} · {sname} [Session Chair]")
-        for cid in s.get("contentIds", []):
+        for cid in (s.get("contentIds") or []):
             c = contents.get(cid)
             if not c or c.get("isBreak"):
                 continue
             title = _clean(c["title"])
-            names = [person_name(people[a["personId"]]) for a in c.get("authors", []) if a["personId"] in people]
-            for a in c.get("authors", []):
+            names = [person_name(people[a["personId"]]) for a in (c.get("authors") or []) if a["personId"] in people]
+            for a in (c.get("authors") or []):
                 sched.setdefault(a["personId"], []).append(f"{date} {times} · {room} · {sname} · {title} [Author]")
             # DOI when there is one; otherwise the item's page on the official programme site
             # (61 chi2026 items: journals, some posters, awards, keynotes). "sandbox" has no site.
-            doi = (c.get("addons") or {}).get("doi", {}).get("url", "") or (
+            doi = ((c.get("addons") or {}).get("doi") or {}).get("url", "") or (
                 f"https://programs.sigchi.org/{site.group(1)}/{site.group(2)}/program/content/{cid}" if site else "")
             program.append({
                 "Date": date, "Day": start.strftime("%A"), "Start Time": _clock(start), "End Time": _clock(end),

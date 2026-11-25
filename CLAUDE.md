@@ -19,7 +19,9 @@ and writes the same files the HFES version used, so the frontend and `embed_umap
 - `authors.csv`: one row per person with a paper or a chaired session. The displayed bio
   (`Interest Profile`) is "**At CHI …**" plus their titles. **No abstracts in this file**, because
   every browser downloads it (9.7k people = 6.5 MB, 1.1 MB gzipped).
-- `program.csv`: one row per (content, session), times in the feed's `conference.timeZoneName`.
+- `program.csv`: one row per (content, session). **Feed epochs are local wall-clock stored as UTC**
+  (CHI 2025's 8:45 plenary is 08:45Z), so times are formatted in UTC and `timeZoneName` is ignored.
+  Sessions with `addons.cancelled` keep their row with a `CANCELLED:` prefix.
 - `embed_text.json`: `{person_id: [displayed_bio, titles+abstracts]}`. Server-side only.
   `embed_umap.feed_text()` embeds the abstracts **only while the text still equals the feed bio**:
   claiming a profile re-posts the displayed bio unchanged, and that must not degrade the embedding.
@@ -65,6 +67,7 @@ HFES_DATABASE_URL=dbname=chipeapod python3 embed_umap.py full
 HFES_DATABASE_URL=dbname=chipeapod python3 server.py --port 8000
 python3 devproxy.py                                  # page + /api on :8765 (local stand-in for nginx)
 HFES_FEED_CHECK_SECONDS=0 python3 test_server.py     # selftest
+python3 test_chi_feed.py                            # converter on sandbox-style edge cases (nulls, entities, cancelled)
 ```
 
 If you touch `index.html`'s inline script, `node --check` the extracted script.

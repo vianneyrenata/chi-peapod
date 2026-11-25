@@ -4,6 +4,19 @@ Status as of 2026-09-28. `[x]` done, `[ ]` open, `[?]` needs a decision first.
 CHI 2027: May 10–14, Pittsburgh. The chi2027 feed goes live in **April 2027**; until then, build against `chi2026`.
 
 ## Session log
+**2026-11-03**
+- Ran `chi_feed.py` on the **sandbox** edition (revision 2, CHI 2025 data + seeded edge cases).
+  Fixed in `chi_feed.py`, with `test_chi_feed.py` as the check: explicit `null` for `authors` /
+  `affiliations` / `chairIds` / `contentIds` / `doi` crashed the converter; **feed epochs are local
+  wall-clock stored as UTC** (CHI 2025's 8:45 plenary = 08:45Z; chi2026 was showing 11 am for 9 am
+  sessions, Pittsburgh would have shown 5 am), now formatted in UTC; `addons.cancelled` sessions get a
+  `CANCELLED:` prefix (kept visible); HTML entities unescaped, BOM/zero-width marks and a stray leading
+  diacritic stripped in `_clean`. Fine already: null room → TBA, 45-author paper, CJK/RTL/emoji,
+  4000-char abstract, overlapping sessions, relocated/rescheduled sessions.
+  `deploy/nginx.conf`: `program.csv` now `max-age=300` (other data files stay 1 h). For a 15-min live
+  pull set `HFES_FEED_CHECK_SECONDS=900`. Not tested: a revision moving while the server runs (the
+  sandbox has no live changes).
+
 **2026-10-06**
 - Ported hfe-peapod 09-28→10-06 (see CLAUDE.md "Sync with hfe-peapod" and `../hfe-peapod/CHI-SYNC.md`).
   Still open from that: trim `umap_positions.json` before lowering the data TTL to 30 s; decide what the
@@ -33,7 +46,7 @@ CHI 2027: May 10–14, Pittsburgh. The chi2027 feed goes live in **April 2027**;
   noise + fix the FAQ); keep or drop the "55%"; bio cleanup on claim (store only changed fields)
 
 ## Data and content
-- [x] Feed → `authors.csv` / `program.csv` converter (`chi_feed.py`), times in the conference timezone
+- [x] Feed → `authors.csv` / `program.csv` converter (`chi_feed.py`); feed epochs are wall-clock-as-UTC, formatted in UTC
 - [x] Poller: new revision → re-sync, re-apply user edits, place only new people
 - [x] Abstracts embedded server-side (`embed_text.json`), not shipped to browsers
 - [?] Displayed bio for feed people: currently "**At CHI …**" + titles. Options: friendlier framing
@@ -89,7 +102,7 @@ stored as Presentation IDs, so a moved room/time shows up on the saved list; use
 Postgres; existing dots never move.
 - [x] **Open tabs refetch**: coming back to the foreground with data older than 10 min re-runs
       `loadRealData(true)` (a failed refresh keeps what's on screen)
-- [ ] **CloudFront TTL** on `program.csv`: a room change can take 60 s (poll) + TTL. Aim for ≤5 min
+- [x] **CloudFront TTL** on `program.csv`: `max-age=300` in nginx (2026-11-03); poll + 5 min + 10-min tab refetch
 - [ ] **Claimed-but-unedited bios freeze.** Claiming stores the feed bio in Postgres as `s_profile`, which
       then overrides the feed forever: a later title fix or added paper never shows, and at the next
       `full` the text no longer equals the feed bio, so `feed_text()` treats it as self-written and drops
@@ -103,7 +116,8 @@ Postgres; existing dots never move.
       (the list already skipped them). No "no longer in the programme" notice yet
 - [ ] **New papers / changed abstracts for existing people** don't move their dot until a deliberate
       `full`. Plan one `full` after the final programme (early May), before people rely on the map
-- [ ] Never tested with a real room/time change. Try it on the `sandbox` edition before April
+- [ ] Never tested with a real room/time change while the server runs. Sandbox converts clean
+      (2026-11-03) but has no live revisions; simulate by editing `feed_revision.json` and re-polling
 
 ## Download size and speed (first load today: 4.6 MB gzipped)
 - [ ] **Slim `umap_positions.json`**: drop names from `top_matches`, keep 5–10 matches, round x/y to
