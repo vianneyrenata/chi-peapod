@@ -5,8 +5,10 @@ This is an entry for the CHI Digital Experience competition, adapted from HFE Pe
 
 Data comes from the public CHI programme feed (https://chidigitalexperience.org/programme-data/, CC BY-NC-SA 4.0). The app downloads and rebuilds the data and embedding.
 
-To view a live demo of the CHI application, please visit: d152a4pgizvo84.cloudfront.net
-For a detailed information how peapod was made, the design decisions behind it, and how we are handling errors in general, please visit: vianneyrenata.com/peapod
+To view a live demo of the CHI application, please visit: https://d152a4pgizvo84.cloudfront.net
+
+For a detailed information how peapod was made, the design decisions behind it, how we are handling errors in general, and how people were using it, please visit: https://vianneyrenata.com/peapod
+
 This submission is extensively developed with Anthropic's Claude on the coding side. However, the insights, design decisions and the peapod logo are original.
 
 ## Run it locally
