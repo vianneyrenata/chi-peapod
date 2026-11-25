@@ -17,7 +17,8 @@ CHI 2027: May 10–14, Pittsburgh. The chi2027 feed goes live in **April 2027**;
   Ubuntu 26.04) with `deploy/deploy.sh` + bootstrap. First start: the API now serves an empty catalogue until the
   poller's first sync (fix in `server.py`), then the full build took ~6 min on the box. Env: chi2026 feed,
   poll 900 s, dashboard token set. Still to do: SMTP creds in `/etc/hfes-match.env`; CloudFront
-  (d152a4pgizvo84.cloudfront.net) returns 504 — its origin must be the EC2 DNS name over **HTTP only**.
+  (d152a4pgizvo84.cloudfront.net) live after switching the origin to HTTP only: page/API uncached (Miss, no-store),
+  data files cached with origin TTLs (Hit), query strings and POST forwarded.
 
 **2026-11-03**
 - Ran `chi_feed.py` on the **sandbox** edition (revision 2, CHI 2025 data + seeded edge cases).
